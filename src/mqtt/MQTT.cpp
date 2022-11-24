@@ -98,6 +98,7 @@ void MQTT::onPublish(char *topic, byte *payload, unsigned int length)
 
 void mqttInit()
 {
+    DEBUG_MSG("mqttInit()\n");
     new MQTT();
 }
 
@@ -118,7 +119,9 @@ bool MQTT::connected()
 
 void MQTT::reconnect()
 {
+    DEBUG_MSG("reconnect()\n");
     if (wantsLink()) {
+        DEBUG_MSG("reconnect() wantsLink=true\n");
         // Defaults
         int serverPort = 1883;  
         const char *serverAddr = default_mqtt_address;
@@ -193,6 +196,8 @@ bool MQTT::wantsLink() const
         }
     }
 
+    DEBUG_MSG("wantsLink()\n");
+
 #if HAS_WIFI
     return hasChannel && WiFi.isConnected();
 #endif
@@ -208,7 +213,7 @@ bool MQTT::wantsLink() const
 int32_t MQTT::runOnce()
 {
     bool wantConnection = wantsLink();
-
+    DEBUG("runOnce()\n");
     // If connected poll rapidly, otherwise only occasionally check for a wifi connection change and ability to contact server
     if (!pubSub.loop()) {
         if (wantConnection) {

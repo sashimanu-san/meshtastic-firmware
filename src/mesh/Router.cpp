@@ -11,7 +11,7 @@ extern "C" {
 #include "mesh/compression/unishox2.h"
 }
 
-#if HAS_WIFI || HAS_ETHERNET || defined(ARCH_PORTDUINO)
+#if HAS_WIFI || HAS_ETHERNET
 #include "mqtt/MQTT.h"
 #endif
 
