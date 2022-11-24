@@ -213,7 +213,7 @@ bool MQTT::wantsLink() const
 int32_t MQTT::runOnce()
 {
     bool wantConnection = wantsLink();
-    DEBUG("runOnce()\n");
+    DEBUG_MSG("runOnce()\n");
     // If connected poll rapidly, otherwise only occasionally check for a wifi connection change and ability to contact server
     if (!pubSub.loop()) {
         if (wantConnection) {
