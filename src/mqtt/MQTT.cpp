@@ -199,6 +199,9 @@ bool MQTT::wantsLink() const
 #if HAS_ETHERNET
     return hasChannel && (Ethernet.linkStatus() == LinkON);
 #endif
+#ifdef ARCH_PORTDUINO
+    return hasChannel;
+#endif
     return false;
 }
 
