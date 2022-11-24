@@ -3,11 +3,14 @@ version: "3.7"
 services:
   meshtastic-node:
     build: .
-    deploy:
-      mode: replicated
-      replicas: 4
     networks:
       - mesh
-    
+    ports:
+      - 4403:4403
+    volumes:
+      - portduino_app:/home/mesh
 networks:
   mesh:
+
+volumes:
+  portduino_app:
