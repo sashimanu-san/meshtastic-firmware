@@ -469,6 +469,7 @@ void setup()
 #endif
 
 #ifdef ARCH_PORTDUINO
+    mqttInit();
     initApiServer(TCPPort);
 #endif
 
