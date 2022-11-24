@@ -451,7 +451,7 @@ void setup()
     }
 #endif
 
-#if HAS_WIFI || HAS_ETHERNET
+#if HAS_WIFI || HAS_ETHERNET || defined(ARCH_PORTDUINO)
     mqttInit();
 #endif
 
