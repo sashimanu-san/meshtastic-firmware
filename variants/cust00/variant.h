@@ -18,14 +18,19 @@
 #define BUTTON_PIN 0   // If defined, this will be used for user button presses
 
 #define USE_RF95
-#define LORA_DIO0 26 // a No connect on the SX1262 module
+#define LORA_DIO0 16 // a No connect on the SX1262 module
 #ifndef USE_JTAG
-#define LORA_RESET 14
+#define LORA_RESET 17
 #endif
-#define LORA_DIO1 35 // Not really used
-#define LORA_DIO2 34 // Not really used
+
+#define LORA_DIO1 27 // Not really used
+#define LORA_DIO2 14 // Not really used
+
+#define RF95_SCK  18
+#define RF95_MISO 19
+#define RF95_MOSI 23
+#define RF95_NSS  22
 
 // ratio of voltage divider = 3.20 (R12=100k, R10=220k)
 //#define ADC_MULTIPLIER 3.2
 //#define BATTERY_PIN 13 // A battery voltage measurement pin, voltage divider connected here to measure battery voltage
-
