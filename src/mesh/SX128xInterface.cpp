@@ -1,8 +1,7 @@
 #include "configuration.h"
 #include "SX128xInterface.h"
+#include "mesh/NodeDB.h"
 #include "error.h"
-
-#if defined(RADIOLIB_GODMODE)
 
 // Particular boards might define a different max power based on what their hardware can do
 #ifndef SX128X_MAX_POWER
@@ -26,12 +25,17 @@ bool SX128xInterface<T>::init()
     digitalWrite(SX128X_POWER_EN, HIGH);
     pinMode(SX128X_POWER_EN, OUTPUT);
 #endif
-
-#ifdef SX128X_RXEN                  // set not rx or tx mode
+  
+#ifdef RF95_FAN_EN
+    pinMode(RF95_FAN_EN, OUTPUT);
+    digitalWrite(RF95_FAN_EN, 1);
+#endif
+  
+#if defined(SX128X_RXEN) && (SX128X_RXEN != RADIOLIB_NC) // set not rx or tx mode
     digitalWrite(SX128X_RXEN, LOW); // Set low before becoming an output
     pinMode(SX128X_RXEN, OUTPUT);
 #endif
-#ifdef SX128X_TXEN
+#if defined(SX128X_TXEN) && (SX128X_TXEN != RADIOLIB_NC)
     digitalWrite(SX128X_TXEN, LOW);
     pinMode(SX128X_TXEN, OUTPUT);
 #endif
@@ -46,19 +50,29 @@ bool SX128xInterface<T>::init()
 
     limitPower();
 
+    preambleLength = 12; // 12 is the default for this chip, 32 does not RX at all
+
     int res = lora.begin(getFreq(), bw, sf, cr, syncWord, power, preambleLength);
     // \todo Display actual typename of the adapter, not just `SX128x`
-    DEBUG_MSG("SX128x init result %d\n", res);
+    LOG_INFO("SX128x init result %d\n", res);
 
-    DEBUG_MSG("Frequency set to %f\n", getFreq());    
-    DEBUG_MSG("Bandwidth set to %f\n", bw);    
-    DEBUG_MSG("Power output set to %d\n", power);    
-
-#ifdef SX128X_TXEN
-    // lora.begin sets Dio2 as RF switch control, which is not true if we are manually controlling RX and TX
-    if (res == RADIOLIB_ERR_NONE)
-        res = lora.setDio2AsRfSwitch(true);
+    if((config.lora.region != Config_LoRaConfig_RegionCode_LORA_24) && (res == RADIOLIB_ERR_INVALID_FREQUENCY)) {
+        LOG_WARN("Radio chip only supports 2.4GHz LoRa. Adjusting Region and rebooting.\n");
+        config.lora.region = Config_LoRaConfig_RegionCode_LORA_24;
+        nodeDB.saveToDisk(SEGMENT_CONFIG);
+        delay(2000);
+#if defined(ARCH_ESP32)
+        ESP.restart();
+#elif defined(ARCH_NRF52)
+        NVIC_SystemReset();
+#else
+        LOG_ERROR("FIXME implement reboot for this platform. Skipping for now.\n");
 #endif
+    }
+
+    LOG_INFO("Frequency set to %f\n", getFreq());    
+    LOG_INFO("Bandwidth set to %f\n", bw);    
+    LOG_INFO("Power output set to %d\n", power);    
 
     if (res == RADIOLIB_ERR_NONE)
         res = lora.setCRC(2);
@@ -123,17 +137,27 @@ void INTERRUPT_ATTR SX128xInterface<T>::disableInterrupt()
 }
 
 template<typename T>
+bool SX128xInterface<T>::wideLora()
+{
+    return true;
+}
+
+template<typename T>
 void SX128xInterface<T>::setStandby()
 {
     checkNotification(); // handle any pending interrupts before we force standby
     
     int err = lora.standby();
+
+    if (err != RADIOLIB_ERR_NONE)
+        LOG_ERROR("SX128x standby failed with error %d\n", err);
+
     assert(err == RADIOLIB_ERR_NONE);
 
-#ifdef SX128X_RXEN // we have RXEN/TXEN control - turn off RX and TX power
+#if defined(SX128X_RXEN) && (SX128X_RXEN != RADIOLIB_NC) // we have RXEN/TXEN control - turn off RX and TX power
     digitalWrite(SX128X_RXEN, LOW);
 #endif
-#ifdef SX128X_TXEN
+#if defined(SX128X_TXEN) && (SX128X_TXEN != RADIOLIB_NC)
     digitalWrite(SX128X_TXEN, LOW);
 #endif
 
@@ -148,7 +172,7 @@ void SX128xInterface<T>::setStandby()
 template<typename T>
 void SX128xInterface<T>::addReceiveMetadata(MeshPacket *mp)
 {
-    // DEBUG_MSG("PacketStatus %x\n", lora.getPacketStatus());
+    // LOG_DEBUG("PacketStatus %x\n", lora.getPacketStatus());
     mp->rx_snr = lora.getSNR();
     mp->rx_rssi = lround(lora.getRSSI());
 }
@@ -158,10 +182,10 @@ void SX128xInterface<T>::addReceiveMetadata(MeshPacket *mp)
 template<typename T>
 void SX128xInterface<T>::configHardwareForSend()
 {
-#ifdef SX128X_TXEN // we have RXEN/TXEN control - turn on TX power / off RX power
+#if defined(SX128X_TXEN) && (SX128X_TXEN != RADIOLIB_NC) // we have RXEN/TXEN control - turn on TX power / off RX power
     digitalWrite(SX128X_TXEN, HIGH);
 #endif
-#ifdef SX128X_RXEN
+#if defined(SX128X_RXEN) && (SX128X_RXEN != RADIOLIB_NC)
     digitalWrite(SX128X_RXEN, LOW);
 #endif
 
@@ -180,10 +204,10 @@ void SX128xInterface<T>::startReceive()
 
     setStandby();
 
-#ifdef SX128X_RXEN // we have RXEN/TXEN control - turn on RX power / off TX power
+#if defined(SX128X_RXEN) && (SX128X_RXEN != RADIOLIB_NC) // we have RXEN/TXEN control - turn on RX power / off TX power
     digitalWrite(SX128X_RXEN, HIGH);
 #endif
-#ifdef SX128X_TXEN
+#if defined(SX128X_TXEN) && (SX128X_TXEN != RADIOLIB_NC)
     digitalWrite(SX128X_TXEN, LOW);
 #endif
   
@@ -219,8 +243,6 @@ bool SX128xInterface<T>::isChannelActive()
 template<typename T>
 bool SX128xInterface<T>::isActivelyReceiving()
 {
-    // return isChannelActive();
-
     uint16_t irq = lora.getIrqStatus();
     bool hasPreamble = (irq & RADIOLIB_SX128X_IRQ_HEADER_VALID);
     return hasPreamble;
@@ -231,7 +253,7 @@ bool SX128xInterface<T>::sleep()
 {
     // Not keeping config is busted - next time nrf52 board boots lora sending fails  tcxo related? - see datasheet
     // \todo Display actual typename of the adapter, not just `SX128x`
-    DEBUG_MSG("SX128x entering sleep mode (FIXME, don't keep config)\n");
+    LOG_DEBUG("SX128x entering sleep mode (FIXME, don't keep config)\n");
     setStandby(); // Stop any pending operations
 
     // turn off TCXO if it was powered
@@ -248,5 +270,3 @@ bool SX128xInterface<T>::sleep()
 
     return true;
 }
-
-#endif

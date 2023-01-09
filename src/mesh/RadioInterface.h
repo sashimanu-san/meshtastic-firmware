@@ -1,6 +1,5 @@
 #pragma once
 
-#include "../concurrency/NotifiedWorkerThread.h"
 #include "MemoryPool.h"
 #include "MeshTypes.h"
 #include "Observer.h"
@@ -97,6 +96,8 @@ class RadioInterface
      */
     virtual bool canSleep() { return true; }
 
+    virtual bool wideLora() { return false; }
+
     /// Prepare hardware for sleep.  Call this _only_ for deep sleep, not needed for light sleep.
     virtual bool sleep() { return true; }
 
@@ -113,6 +114,13 @@ class RadioInterface
      * If the txmit queue is full it might return an error
      */
     virtual ErrorCode send(MeshPacket *p) = 0;
+
+    /** Return TX queue status */
+    virtual QueueStatus getQueueStatus() {
+        QueueStatus qs;
+        qs.res = qs.mesh_packet_id = qs.free = qs.maxlen = 0;
+        return qs;
+    }
 
     /** Attempt to cancel a previously sent packet.  Returns true if a packet was found we could cancel */
     virtual bool cancelSending(NodeNum from, PacketId id) { return false; }

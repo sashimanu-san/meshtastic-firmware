@@ -52,10 +52,15 @@ FIXME in the initial proof of concept we just skip the entire want/deny flow and
 
 MeshService service;
 
+static MemoryDynamic<QueueStatus> staticQueueStatusPool;
+
+Allocator<QueueStatus> &queueStatusPool = staticQueueStatusPool;
+
 #include "Router.h"
 
-MeshService::MeshService() : toPhoneQueue(MAX_RX_TOPHONE)
+MeshService::MeshService() : toPhoneQueue(MAX_RX_TOPHONE), toPhoneQueueStatusQueue(MAX_RX_TOPHONE)
 {
+    lastQueueStatus = { 0, 0, 16, 0 };
     // assert(MAX_RX_TOPHONE == 32); // FIXME, delete this, just checking my clever macro
 }
 
@@ -83,6 +88,11 @@ int MeshService::handleFromRadio(const MeshPacket *mp)
 /// Do idle processing (mostly processing messages which have been queued from the radio)
 void MeshService::loop()
 {
+    if (lastQueueStatus.free == 0) { // check if there is now free space in TX queue
+        QueueStatus qs = router->getQueueStatus();
+        if (qs.free != lastQueueStatus.free)
+            (void)sendQueueStatusToPhone(qs, 0, 0);
+    }
     if (oldFromNum != fromNum) { // We don't want to generate extra notifies for multiple new packets
         fromNumChanged.notifyObservers(fromNum);
         oldFromNum = fromNum;
@@ -106,7 +116,7 @@ bool MeshService::reloadConfig(int saveWhat)
 /// The owner User record just got updated, update our node DB and broadcast the info into the mesh
 void MeshService::reloadOwner(bool shouldSave)
 {
-    // DEBUG_MSG("reloadOwner()\n");
+    // LOG_DEBUG("reloadOwner()\n");
     // update our local data directly
     nodeDB.updateUser(nodeDB.getNodeNum(), owner);
     assert(nodeInfoModule);
@@ -140,7 +150,7 @@ void MeshService::handleToRadio(MeshPacket &p)
                 // Switch the port from PortNum_SIMULATOR_APP back to the original PortNum 
                 p.decoded.portnum = decoded->portnum;
             } else
-                DEBUG_MSG("Error decoding protobuf for simulator message!\n");
+                LOG_ERROR("Error decoding protobuf for simulator message!\n");
         }
         // Let SimRadio receive as if it did via its LoRa chip
         SimRadio::instance->startReceive(&p); 
@@ -148,7 +158,7 @@ void MeshService::handleToRadio(MeshPacket &p)
     }
     #endif
     if (p.from != 0) { // We don't let phones assign nodenums to their sent messages
-        DEBUG_MSG("Warning: phone tried to pick a nodenum, we don't allow that.\n");
+        LOG_WARN("phone tried to pick a nodenum, we don't allow that.\n");
         p.from = 0;
     } else {
         // p.from = nodeDB.getNodeNum();
@@ -179,12 +189,43 @@ bool MeshService::cancelSending(PacketId id)
     return router->cancelSending(nodeDB.getNodeNum(), id);
 }
 
+ErrorCode MeshService::sendQueueStatusToPhone(const QueueStatus &qs, ErrorCode res, uint32_t mesh_packet_id)
+{
+    QueueStatus *copied = queueStatusPool.allocCopy(qs);
+
+    copied->res = res;
+    copied->mesh_packet_id = mesh_packet_id;
+
+    if (toPhoneQueueStatusQueue.numFree() == 0) {
+        LOG_DEBUG("NOTE: tophone queue status queue is full, discarding oldest\n");
+        QueueStatus *d = toPhoneQueueStatusQueue.dequeuePtr(0);
+        if (d)
+            releaseQueueStatusToPool(d);
+    }
+
+    lastQueueStatus = *copied;
+
+    res = toPhoneQueueStatusQueue.enqueue(copied, 0);
+    fromNum++;
+
+    return res ? ERRNO_OK : ERRNO_UNKNOWN;
+}
+
 void MeshService::sendToMesh(MeshPacket *p, RxSource src, bool ccToPhone)
 {
+    uint32_t mesh_packet_id = p->id;
     nodeDB.updateFrom(*p); // update our local DB for this packet (because phone might have sent position packets etc...)
 
     // Note: We might return !OK if our fifo was full, at that point the only option we have is to drop it
-    router->sendLocal(p, src);
+    ErrorCode res = router->sendLocal(p, src);
+
+    /* NOTE(pboldin): Prepare and send QueueStatus message to the phone as a
+     * high-priority message. */
+    QueueStatus qs = router->getQueueStatus();
+    ErrorCode r = sendQueueStatusToPhone(qs, res, mesh_packet_id);
+    if (r != ERRNO_OK) {
+        LOG_DEBUG("Can't send status to phone");
+    }
 
     if (ccToPhone) {
         sendToPhone(p);
@@ -198,12 +239,12 @@ void MeshService::sendNetworkPing(NodeNum dest, bool wantReplies)
 
     if (node->has_position && (node->position.latitude_i != 0 || node->position.longitude_i != 0)) {
         if (positionModule) {
-            DEBUG_MSG("Sending position ping to 0x%x, wantReplies=%d\n", dest, wantReplies);
+            LOG_INFO("Sending position ping to 0x%x, wantReplies=%d\n", dest, wantReplies);
             positionModule->sendOurPosition(dest, wantReplies);
         }
     } else {
         if (nodeInfoModule) {
-            DEBUG_MSG("Sending nodeinfo ping to 0x%x, wantReplies=%d\n", dest, wantReplies);
+            LOG_INFO("Sending nodeinfo ping to 0x%x, wantReplies=%d\n", dest, wantReplies);
             nodeInfoModule->sendOurNodeInfo(dest, wantReplies);
         }
     }
@@ -212,7 +253,7 @@ void MeshService::sendNetworkPing(NodeNum dest, bool wantReplies)
 void MeshService::sendToPhone(MeshPacket *p)
 {
     if (toPhoneQueue.numFree() == 0) {
-        DEBUG_MSG("NOTE: tophone queue is full, discarding oldest\n");
+        LOG_WARN("ToPhone queue is full, discarding oldest\n");
         MeshPacket *d = toPhoneQueue.dequeuePtr(0);
         if (d)
             releaseToPool(d);
@@ -262,10 +303,10 @@ int MeshService::onGPSChanged(const meshtastic::GPSStatus *newStatus)
         // The GPS has lost lock, if we are fixed position we should just keep using
         // the old position
 #ifdef GPS_EXTRAVERBOSE
-        DEBUG_MSG("onGPSchanged() - lost validLocation\n");
+        LOG_DEBUG("onGPSchanged() - lost validLocation\n");
 #endif
         if (config.position.fixed_position) {
-            DEBUG_MSG("WARNING: Using fixed position\n");
+            LOG_WARN("Using fixed position\n");
             pos = node->position;
         }
     }
@@ -276,7 +317,7 @@ int MeshService::onGPSChanged(const meshtastic::GPSStatus *newStatus)
     pos.time = getValidTime(RTCQualityGPS);
 
     // In debug logs, identify position by @timestamp:stage (stage 4 = nodeDB)
-    DEBUG_MSG("onGPSChanged() pos@%x, time=%u, lat=%d, lon=%d, alt=%d\n", pos.timestamp, pos.time, pos.latitude_i,
+    LOG_DEBUG("onGPSChanged() pos@%x, time=%u, lat=%d, lon=%d, alt=%d\n", pos.timestamp, pos.time, pos.latitude_i,
               pos.longitude_i, pos.altitude);
 
     // Update our current position in the local DB

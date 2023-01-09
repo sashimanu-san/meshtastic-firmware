@@ -102,6 +102,10 @@ class AnalogBatteryLevel : public HasBatteryLevel
 #define ADC_MULTIPLIER 2.0
 #endif
 
+#ifndef BATTERY_SENSE_SAMPLES
+#define BATTERY_SENSE_SAMPLES 30
+#endif
+
 #ifdef BATTERY_PIN
         // Override variant or default ADC_MULTIPLIER if we have the override pref
         float operativeAdcMultiplier = config.power.adc_multiplier_override > 0
@@ -112,16 +116,12 @@ class AnalogBatteryLevel : public HasBatteryLevel
         if (millis() - last_read_time_ms > min_read_interval) {
             last_read_time_ms = millis();
 
-#ifdef BATTERY_SENSE_SAMPLES
 //Set the number of samples, it has an effect of increasing sensitivity, especially in complex electromagnetic environment.
             uint32_t raw = 0;
-            for(uint32_t i=0; i<BATTERY_SENSE_SAMPLES;i++){
+            for(uint32_t i=0; i<BATTERY_SENSE_SAMPLES; i++){
                 raw += analogRead(BATTERY_PIN);
             }
             raw = raw/BATTERY_SENSE_SAMPLES;
-#else
-            uint32_t raw = analogRead(BATTERY_PIN);
-#endif
 
             float scaled;
 #ifndef VBAT_RAW_TO_SCALED
@@ -129,7 +129,7 @@ class AnalogBatteryLevel : public HasBatteryLevel
 #else
             scaled = VBAT_RAW_TO_SCALED(raw); // defined in variant.h
 #endif
-            // DEBUG_MSG("battery gpio %d raw val=%u scaled=%u\n", BATTERY_PIN, raw, (uint32_t)(scaled));
+            // LOG_DEBUG("battery gpio %d raw val=%u scaled=%u\n", BATTERY_PIN, raw, (uint32_t)(scaled));
             last_read_value = scaled;
             return scaled;
         } else {
@@ -182,12 +182,15 @@ Power::Power() : OSThread("Power")
 {
     statusHandler = {};
     low_voltage_counter = 0;
+#ifdef DEBUG_HEAP
+    lastheap = ESP.getFreeHeap();
+#endif
 }
 
 bool Power::analogInit()
 {
 #ifdef BATTERY_PIN
-    DEBUG_MSG("Using analog input %d for battery level\n", BATTERY_PIN);
+    LOG_DEBUG("Using analog input %d for battery level\n", BATTERY_PIN);
 
     // disable any internal pullups
     pinMode(BATTERY_PIN, INPUT);
@@ -239,7 +242,7 @@ void Power::shutdown()
 #endif
 
 #ifdef HAS_PMU
-    DEBUG_MSG("Shutting down\n");
+    LOG_INFO("Shutting down\n");
     if(PMU) {
         PMU->setChargingLedMode(XPOWERS_CHG_LED_OFF);
         PMU->shutdown();
@@ -280,9 +283,25 @@ void Power::readPowerStatus()
         const PowerStatus powerStatus2 =
             PowerStatus(hasBattery ? OptTrue : OptFalse, batteryLevel->isVbusIn() ? OptTrue : OptFalse,
                         batteryLevel->isCharging() ? OptTrue : OptFalse, batteryVoltageMv, batteryChargePercent);
-        DEBUG_MSG("Battery: usbPower=%d, isCharging=%d, batMv=%d, batPct=%d\n", powerStatus2.getHasUSB(),
+        LOG_DEBUG("Battery: usbPower=%d, isCharging=%d, batMv=%d, batPct=%d\n", powerStatus2.getHasUSB(),
                   powerStatus2.getIsCharging(), powerStatus2.getBatteryVoltageMv(), powerStatus2.getBatteryChargePercent());
         newStatus.notifyObservers(&powerStatus2);
+#ifdef DEBUG_HEAP
+        if (lastheap != ESP.getFreeHeap()) {
+            LOG_DEBUG("Threads running:");
+            int running = 0;
+            for(int i = 0; i < MAX_THREADS; i++){
+                auto thread = concurrency::mainController.get(i);
+                if((thread != nullptr) && (thread->enabled)) {
+                    LOG_DEBUG(" %s", thread->ThreadName.c_str());
+                    running++;
+                }
+            }
+            LOG_DEBUG("\n");
+            LOG_DEBUG("Heap status: %d/%d bytes free (%d), running %d/%d threads\n", ESP.getFreeHeap(), ESP.getHeapSize(), ESP.getFreeHeap() - lastheap, running, concurrency::mainController.size(false));
+            lastheap = ESP.getFreeHeap();
+        }
+#endif
 
 // If we have a battery at all and it is less than 10% full, force deep sleep if we have more than 3 low readings in a row
 // Supect fluctuating voltage on the RAK4631 to force it to deep sleep even if battery is at 85% after only a few days
@@ -290,8 +309,12 @@ void Power::readPowerStatus()
         if (powerStatus2.getHasBattery() && !powerStatus2.getHasUSB()) {
             if (batteryLevel->getBattVoltage() < MIN_BAT_MILLIVOLTS) {
                 low_voltage_counter++;
-                if (low_voltage_counter > 3)
-                    powerFSM.trigger(EVENT_LOW_BATTERY);
+                LOG_DEBUG("Warning RAK4631 Low voltage counter: %d/10\n", low_voltage_counter);
+                if (low_voltage_counter > 10) {
+                    // We can't trigger deep sleep on NRF52, it's freezing the board
+                    //powerFSM.trigger(EVENT_LOW_BATTERY);
+                    LOG_DEBUG("Low voltage detected, but not triggering deep sleep\n");
+                }
             } else {
                 low_voltage_counter = 0;
             }
@@ -320,12 +343,12 @@ int32_t Power::runOnce()
         PMU->getIrqStatus();
 
         if(PMU->isVbusRemoveIrq()){
-            DEBUG_MSG("USB unplugged\n");
+            LOG_INFO("USB unplugged\n");
             powerFSM.trigger(EVENT_POWER_DISCONNECTED);
         }
 
         if (PMU->isVbusInsertIrq()) {
-            DEBUG_MSG("USB plugged In\n");
+            LOG_INFO("USB plugged In\n");
             powerFSM.trigger(EVENT_POWER_CONNECTED);
         }
 
@@ -333,20 +356,20 @@ int32_t Power::runOnce()
         Other things we could check if we cared...
 
         if (PMU->isBatChagerStartIrq()) {
-            DEBUG_MSG("Battery start charging\n");
+            LOG_DEBUG("Battery start charging\n");
         }
         if (PMU->isBatChagerDoneIrq()) {
-            DEBUG_MSG("Battery fully charged\n");
+            LOG_DEBUG("Battery fully charged\n");
         }
         if (PMU->isBatInsertIrq()) {
-            DEBUG_MSG("Battery inserted\n");
+            LOG_DEBUG("Battery inserted\n");
         }
         if (PMU->isBatRemoveIrq()) {
-            DEBUG_MSG("Battery removed\n");
+            LOG_DEBUG("Battery removed\n");
         }
         */
         if (PMU->isPekeyLongPressIrq()) {
-            DEBUG_MSG("PEK long button press\n");
+            LOG_DEBUG("PEK long button press\n");
             screen->setOn(false);
         }
 
@@ -388,22 +411,22 @@ bool Power::axpChipInit()
     if (!PMU) {
         PMU = new XPowersAXP2101(*w);
         if (!PMU->init()) {
-            DEBUG_MSG("Warning: Failed to find AXP2101 power management\n");
+            LOG_WARN("Failed to find AXP2101 power management\n");
             delete PMU;
             PMU = NULL;
         } else {
-            DEBUG_MSG("AXP2101 PMU init succeeded, using AXP2101 PMU\n");
+            LOG_INFO("AXP2101 PMU init succeeded, using AXP2101 PMU\n");
         }
     }
 
     if (!PMU) {
         PMU = new XPowersAXP192(*w);
         if (!PMU->init()) {
-            DEBUG_MSG("Warning: Failed to find AXP192 power management\n");
+            LOG_WARN("Failed to find AXP192 power management\n");
             delete PMU;
             PMU = NULL;
         } else {
-            DEBUG_MSG("AXP192 PMU init succeeded, using AXP192 PMU\n");
+            LOG_INFO("AXP192 PMU init succeeded, using AXP192 PMU\n");
         }
     }
 
@@ -525,50 +548,54 @@ bool Power::axpChipInit()
     PMU->enableVbusVoltageMeasure();
     PMU->enableBattVoltageMeasure();
 
-    DEBUG_MSG("=======================================================================\n");
+    LOG_DEBUG("=======================================================================\n");
     if (PMU->isChannelAvailable(XPOWERS_DCDC1)) {
-        DEBUG_MSG("DC1  : %s   Voltage:%u mV \n",  PMU->isPowerChannelEnable(XPOWERS_DCDC1)  ? "+" : "-",  PMU->getPowerChannelVoltage(XPOWERS_DCDC1));
+        LOG_DEBUG("DC1  : %s   Voltage:%u mV \n",  PMU->isPowerChannelEnable(XPOWERS_DCDC1)  ? "+" : "-",  PMU->getPowerChannelVoltage(XPOWERS_DCDC1));
     }
     if (PMU->isChannelAvailable(XPOWERS_DCDC2)) {
-        DEBUG_MSG("DC2  : %s   Voltage:%u mV \n",  PMU->isPowerChannelEnable(XPOWERS_DCDC2)  ? "+" : "-",  PMU->getPowerChannelVoltage(XPOWERS_DCDC2));
+        LOG_DEBUG("DC2  : %s   Voltage:%u mV \n",  PMU->isPowerChannelEnable(XPOWERS_DCDC2)  ? "+" : "-",  PMU->getPowerChannelVoltage(XPOWERS_DCDC2));
     }
     if (PMU->isChannelAvailable(XPOWERS_DCDC3)) {
-        DEBUG_MSG("DC3  : %s   Voltage:%u mV \n",  PMU->isPowerChannelEnable(XPOWERS_DCDC3)  ? "+" : "-",  PMU->getPowerChannelVoltage(XPOWERS_DCDC3));
+        LOG_DEBUG("DC3  : %s   Voltage:%u mV \n",  PMU->isPowerChannelEnable(XPOWERS_DCDC3)  ? "+" : "-",  PMU->getPowerChannelVoltage(XPOWERS_DCDC3));
     }
     if (PMU->isChannelAvailable(XPOWERS_DCDC4)) {
-        DEBUG_MSG("DC4  : %s   Voltage:%u mV \n",  PMU->isPowerChannelEnable(XPOWERS_DCDC4)  ? "+" : "-",  PMU->getPowerChannelVoltage(XPOWERS_DCDC4));
+        LOG_DEBUG("DC4  : %s   Voltage:%u mV \n",  PMU->isPowerChannelEnable(XPOWERS_DCDC4)  ? "+" : "-",  PMU->getPowerChannelVoltage(XPOWERS_DCDC4));
     }
     if (PMU->isChannelAvailable(XPOWERS_LDO2)) {
-        DEBUG_MSG("LDO2 : %s   Voltage:%u mV \n",  PMU->isPowerChannelEnable(XPOWERS_LDO2)   ? "+" : "-",  PMU->getPowerChannelVoltage(XPOWERS_LDO2));
+        LOG_DEBUG("LDO2 : %s   Voltage:%u mV \n",  PMU->isPowerChannelEnable(XPOWERS_LDO2)   ? "+" : "-",  PMU->getPowerChannelVoltage(XPOWERS_LDO2));
     }
     if (PMU->isChannelAvailable(XPOWERS_LDO3)) {
-        DEBUG_MSG("LDO3 : %s   Voltage:%u mV \n",  PMU->isPowerChannelEnable(XPOWERS_LDO3)   ? "+" : "-",  PMU->getPowerChannelVoltage(XPOWERS_LDO3));
+        LOG_DEBUG("LDO3 : %s   Voltage:%u mV \n",  PMU->isPowerChannelEnable(XPOWERS_LDO3)   ? "+" : "-",  PMU->getPowerChannelVoltage(XPOWERS_LDO3));
     }
     if (PMU->isChannelAvailable(XPOWERS_ALDO1)) {
-        DEBUG_MSG("ALDO1: %s   Voltage:%u mV \n",  PMU->isPowerChannelEnable(XPOWERS_ALDO1)  ? "+" : "-",  PMU->getPowerChannelVoltage(XPOWERS_ALDO1));
+        LOG_DEBUG("ALDO1: %s   Voltage:%u mV \n",  PMU->isPowerChannelEnable(XPOWERS_ALDO1)  ? "+" : "-",  PMU->getPowerChannelVoltage(XPOWERS_ALDO1));
     }
     if (PMU->isChannelAvailable(XPOWERS_ALDO2)) {
-        DEBUG_MSG("ALDO2: %s   Voltage:%u mV \n",  PMU->isPowerChannelEnable(XPOWERS_ALDO2)  ? "+" : "-",  PMU->getPowerChannelVoltage(XPOWERS_ALDO2));
+        LOG_DEBUG("ALDO2: %s   Voltage:%u mV \n",  PMU->isPowerChannelEnable(XPOWERS_ALDO2)  ? "+" : "-",  PMU->getPowerChannelVoltage(XPOWERS_ALDO2));
     }
     if (PMU->isChannelAvailable(XPOWERS_ALDO3)) {
-        DEBUG_MSG("ALDO3: %s   Voltage:%u mV \n",  PMU->isPowerChannelEnable(XPOWERS_ALDO3)  ? "+" : "-",  PMU->getPowerChannelVoltage(XPOWERS_ALDO3));
+        LOG_DEBUG("ALDO3: %s   Voltage:%u mV \n",  PMU->isPowerChannelEnable(XPOWERS_ALDO3)  ? "+" : "-",  PMU->getPowerChannelVoltage(XPOWERS_ALDO3));
     }
     if (PMU->isChannelAvailable(XPOWERS_ALDO4)) {
-        DEBUG_MSG("ALDO4: %s   Voltage:%u mV \n",  PMU->isPowerChannelEnable(XPOWERS_ALDO4)  ? "+" : "-",  PMU->getPowerChannelVoltage(XPOWERS_ALDO4));
+        LOG_DEBUG("ALDO4: %s   Voltage:%u mV \n",  PMU->isPowerChannelEnable(XPOWERS_ALDO4)  ? "+" : "-",  PMU->getPowerChannelVoltage(XPOWERS_ALDO4));
     }
     if (PMU->isChannelAvailable(XPOWERS_BLDO1)) {
-        DEBUG_MSG("BLDO1: %s   Voltage:%u mV \n",  PMU->isPowerChannelEnable(XPOWERS_BLDO1)  ? "+" : "-",  PMU->getPowerChannelVoltage(XPOWERS_BLDO1));
+        LOG_DEBUG("BLDO1: %s   Voltage:%u mV \n",  PMU->isPowerChannelEnable(XPOWERS_BLDO1)  ? "+" : "-",  PMU->getPowerChannelVoltage(XPOWERS_BLDO1));
     }
     if (PMU->isChannelAvailable(XPOWERS_BLDO2)) {
-        DEBUG_MSG("BLDO2: %s   Voltage:%u mV \n",  PMU->isPowerChannelEnable(XPOWERS_BLDO2)  ? "+" : "-",  PMU->getPowerChannelVoltage(XPOWERS_BLDO2));
+        LOG_DEBUG("BLDO2: %s   Voltage:%u mV \n",  PMU->isPowerChannelEnable(XPOWERS_BLDO2)  ? "+" : "-",  PMU->getPowerChannelVoltage(XPOWERS_BLDO2));
     }
-    DEBUG_MSG("=======================================================================\n");
+    LOG_DEBUG("=======================================================================\n");
 
-
-
+// We can safely ignore this approach for most (or all) boards because MCU turned off
+// earlier than battery discharged to 2.6V.
+//
+// Unfortanly for now we can't use this killswitch for RAK4630-based boards because they have a bug with
+// battery voltage measurement. Probably it sometimes drops to low values.
+#ifndef RAK4630
     // Set PMU shutdown voltage at 2.6V to maximize battery utilization
     PMU->setSysPowerDownVoltage(2600);
-
+#endif
 
 
 #ifdef PMU_IRQ

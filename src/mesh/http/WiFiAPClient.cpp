@@ -1,7 +1,7 @@
-#include "mesh/http/WiFiAPClient.h"
 #include "NodeDB.h"
 #include "RTC.h"
 #include "concurrency/Periodic.h"
+#include "mesh/http/WiFiAPClient.h"
 #include "configuration.h"
 #include "main.h"
 #include "mesh/http/WebServer.h"
@@ -37,9 +37,9 @@ bool APStartupComplete = 0;
 
 unsigned long lastrun_ntp = 0;
 
-static bool needReconnect = true; // If we create our reconnector, run it once at the beginning
+bool needReconnect = true; // If we create our reconnector, run it once at the beginning
 
-static Periodic *wifiReconnect;
+Periodic *wifiReconnect;
 
 static int32_t reconnectWiFi()
 {
@@ -56,31 +56,17 @@ static int32_t reconnectWiFi()
         // Make sure we clear old connection credentials
         WiFi.disconnect(false, true);
 
-        DEBUG_MSG("... Reconnecting to WiFi access point %s\n",wifiName);
+        LOG_INFO("Reconnecting to WiFi access point %s\n",wifiName);
 
-        int n = WiFi.scanNetworks();
-
-        if (n > 0) {
-            for (int i = 0; i < n; ++i) {
-                DEBUG_MSG("Found WiFi network %s, signal strength %d\n", WiFi.SSID(i).c_str(), WiFi.RSSI(i));
-                yield();
-            }
-            WiFi.mode(WIFI_MODE_STA);
-            WiFi.begin(wifiName, wifiPsw);
-        } else {
-            DEBUG_MSG("No networks found during site survey. Rebooting MCU...\n");
-            screen->startRebootScreen();
-            rebootAtMsec = millis() + 5000;
-        }
-
-
+        WiFi.mode(WIFI_MODE_STA);
+        WiFi.begin(wifiName, wifiPsw);
     }
 
 #ifndef DISABLE_NTP
     if (WiFi.isConnected() && (((millis() - lastrun_ntp) > 43200000) || (lastrun_ntp == 0))) { // every 12 hours
-        DEBUG_MSG("Updating NTP time\n");
+        LOG_DEBUG("Updating NTP time from %s\n",config.network.ntp_server);
         if (timeClient.update()) {
-            DEBUG_MSG("NTP Request Success - Setting RTCQualityNTP if needed\n");
+            LOG_DEBUG("NTP Request Success - Setting RTCQualityNTP if needed\n");
 
             struct timeval tv;
             tv.tv_sec = timeClient.getEpochTime();
@@ -90,7 +76,7 @@ static int32_t reconnectWiFi()
             lastrun_ntp = millis();
 
         } else {
-            DEBUG_MSG("NTP Update failed\n");
+            LOG_DEBUG("NTP Update failed\n");
         }
     }
 #endif
@@ -115,12 +101,12 @@ bool isWifiAvailable()
 // Disable WiFi
 void deinitWifi()
 {
-    DEBUG_MSG("WiFi deinit\n");
+    LOG_INFO("WiFi deinit\n");
 
     if (isWifiAvailable()) {
         WiFi.disconnect(true);
         WiFi.mode(WIFI_MODE_NULL);
-        DEBUG_MSG("WiFi Turned Off\n");
+        LOG_INFO("WiFi Turned Off\n");
         // WiFi.printDiag(Serial);
     }
 }
@@ -129,20 +115,20 @@ static void onNetworkConnected()
 {
     if (!APStartupComplete) {
         // Start web server
-        DEBUG_MSG("... Starting network services\n");
+        LOG_INFO("Starting network services\n");
 
         // start mdns
         if (!MDNS.begin("Meshtastic")) {
-            DEBUG_MSG("Error setting up MDNS responder!\n");
+            LOG_ERROR("Error setting up MDNS responder!\n");
         } else {
-            DEBUG_MSG("mDNS responder started\n");
-            DEBUG_MSG("mDNS Host: Meshtastic.local\n");
+            LOG_INFO("mDNS responder started\n");
+            LOG_INFO("mDNS Host: Meshtastic.local\n");
             MDNS.addService("http", "tcp", 80);
             MDNS.addService("https", "tcp", 443);
         }
 
 #ifndef DISABLE_NTP
-        DEBUG_MSG("Starting NTP time client\n");
+        LOG_INFO("Starting NTP time client\n");
         timeClient.begin();
         timeClient.setUpdateInterval(60 * 60); // Update once an hour
 #endif
@@ -168,6 +154,8 @@ bool initWifi()
 
         createSSLCert();
 
+        esp_wifi_set_storage(WIFI_STORAGE_RAM); // Disable flash storage for WiFi credentials
+
         if (!*wifiPsw) // Treat empty password as no password
             wifiPsw = NULL;
 
@@ -181,7 +169,7 @@ bool initWifi()
             WiFi.onEvent(WiFiEvent);
             WiFi.setAutoReconnect(false);
             WiFi.setSleep(false);
-            if (config.network.eth_mode == Config_NetworkConfig_EthMode_STATIC && config.network.ipv4_config.ip != 0) {
+            if (config.network.address_mode == Config_NetworkConfig_AddressMode_STATIC && config.network.ipv4_config.ip != 0) {
                 WiFi.config(config.network.ipv4_config.ip,
                             config.network.ipv4_config.gateway,
                             config.network.ipv4_config.subnet,
@@ -194,8 +182,7 @@ bool initWifi()
 
             WiFi.onEvent(
                 [](WiFiEvent_t event, WiFiEventInfo_t info) {
-                    Serial.print("\nWiFi lost connection. Reason: ");
-                    Serial.println(info.wifi_sta_disconnected.reason);
+                    LOG_WARN("WiFi lost connection. Reason: %s", info.wifi_sta_disconnected.reason);
 
                     /*
                         If we are disconnected from the AP for some reason,
@@ -208,12 +195,12 @@ bool initWifi()
                 },
                 WiFiEvent_t::ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
 
-            DEBUG_MSG("JOINING WIFI soon: ssid=%s\n", wifiName);
+            LOG_DEBUG("JOINING WIFI soon: ssid=%s\n", wifiName);
             wifiReconnect = new Periodic("WifiConnect", reconnectWiFi);
         }
         return true;
     } else {
-        DEBUG_MSG("Not using WIFI\n");
+        LOG_INFO("Not using WIFI\n");
         return false;
     }
 }
@@ -221,91 +208,135 @@ bool initWifi()
 // Called by the Espressif SDK to
 static void WiFiEvent(WiFiEvent_t event)
 {
-    DEBUG_MSG("************ [WiFi-event] event: %d ************\n", event);
+    LOG_DEBUG("WiFi-Event %d: ", event);
 
     switch (event) {
-    case SYSTEM_EVENT_WIFI_READY:
-        DEBUG_MSG("WiFi interface ready\n");
+    case ARDUINO_EVENT_WIFI_READY:
+        LOG_INFO("WiFi interface ready\n");
         break;
-    case SYSTEM_EVENT_SCAN_DONE:
-        DEBUG_MSG("Completed scan for access points\n");
+    case ARDUINO_EVENT_WIFI_SCAN_DONE:
+        LOG_INFO("Completed scan for access points\n");
         break;
-    case SYSTEM_EVENT_STA_START:
-        DEBUG_MSG("WiFi station started\n");
+    case ARDUINO_EVENT_WIFI_STA_START:
+        LOG_INFO("WiFi station started\n");
         break;
-    case SYSTEM_EVENT_STA_STOP:
-        DEBUG_MSG("WiFi station stopped\n");
+    case ARDUINO_EVENT_WIFI_STA_STOP:
+        LOG_INFO("WiFi station stopped\n");
         break;
-    case SYSTEM_EVENT_STA_CONNECTED:
-        DEBUG_MSG("Connected to access point\n");
+    case ARDUINO_EVENT_WIFI_STA_CONNECTED:
+        LOG_INFO("Connected to access point\n");
         break;
-    case SYSTEM_EVENT_STA_DISCONNECTED:
-        DEBUG_MSG("Disconnected from WiFi access point\n");
+    case ARDUINO_EVENT_WIFI_STA_DISCONNECTED:
+        LOG_INFO("Disconnected from WiFi access point\n");
         WiFi.disconnect(false, true);
         needReconnect = true;
         wifiReconnect->setIntervalFromNow(1000);
         break;
-    case SYSTEM_EVENT_STA_AUTHMODE_CHANGE:
-        DEBUG_MSG("Authentication mode of access point has changed\n");
+    case ARDUINO_EVENT_WIFI_STA_AUTHMODE_CHANGE:
+        LOG_INFO("Authentication mode of access point has changed\n");
         break;
-    case SYSTEM_EVENT_STA_GOT_IP:
-        DEBUG_MSG("Obtained IP address: ");
-        Serial.println(WiFi.localIP());
+    case ARDUINO_EVENT_WIFI_STA_GOT_IP:
+        LOG_INFO("Obtained IP address: ", WiFi.localIPv6());
         onNetworkConnected();
         break;
-    case SYSTEM_EVENT_STA_LOST_IP:
-        DEBUG_MSG("Lost IP address and IP address is reset to 0\n");
+    case ARDUINO_EVENT_WIFI_STA_GOT_IP6:
+        LOG_INFO("Obtained IP6 address: %s", WiFi.localIPv6());
+        break;
+    case ARDUINO_EVENT_WIFI_STA_LOST_IP:
+        LOG_INFO("Lost IP address and IP address is reset to 0\n");
         WiFi.disconnect(false, true);
         needReconnect = true;
         wifiReconnect->setIntervalFromNow(1000);
         break;
-    case SYSTEM_EVENT_STA_WPS_ER_SUCCESS:
-        DEBUG_MSG("WiFi Protected Setup (WPS): succeeded in enrollee mode\n");
+    case ARDUINO_EVENT_WPS_ER_SUCCESS:
+        LOG_INFO("WiFi Protected Setup (WPS): succeeded in enrollee mode\n");
         break;
-    case SYSTEM_EVENT_STA_WPS_ER_FAILED:
-        DEBUG_MSG("WiFi Protected Setup (WPS): failed in enrollee mode\n");
+    case ARDUINO_EVENT_WPS_ER_FAILED:
+        LOG_INFO("WiFi Protected Setup (WPS): failed in enrollee mode\n");
         break;
-    case SYSTEM_EVENT_STA_WPS_ER_TIMEOUT:
-        DEBUG_MSG("WiFi Protected Setup (WPS): timeout in enrollee mode\n");
+    case ARDUINO_EVENT_WPS_ER_TIMEOUT:
+        LOG_INFO("WiFi Protected Setup (WPS): timeout in enrollee mode\n");
         break;
-    case SYSTEM_EVENT_STA_WPS_ER_PIN:
-        DEBUG_MSG("WiFi Protected Setup (WPS): pin code in enrollee mode\n");
+    case ARDUINO_EVENT_WPS_ER_PIN:
+        LOG_INFO("WiFi Protected Setup (WPS): pin code in enrollee mode\n");
         break;
-    case SYSTEM_EVENT_AP_START:
-        DEBUG_MSG("WiFi access point started\n");
+    case ARDUINO_EVENT_WPS_ER_PBC_OVERLAP:
+        LOG_INFO("WiFi Protected Setup (WPS): push button overlap in enrollee mode\n");
         break;
-    case SYSTEM_EVENT_AP_STOP:
-        DEBUG_MSG("WiFi access point stopped\n");
+    case ARDUINO_EVENT_WIFI_AP_START:
+        LOG_INFO("WiFi access point started\n");
         break;
-    case SYSTEM_EVENT_AP_STACONNECTED:
-        DEBUG_MSG("Client connected\n");
+    case ARDUINO_EVENT_WIFI_AP_STOP:
+        LOG_INFO("WiFi access point stopped\n");
         break;
-    case SYSTEM_EVENT_AP_STADISCONNECTED:
-        DEBUG_MSG("Client disconnected\n");
+    case ARDUINO_EVENT_WIFI_AP_STACONNECTED:
+        LOG_INFO("Client connected\n");
         break;
-    case SYSTEM_EVENT_AP_STAIPASSIGNED:
-        DEBUG_MSG("Assigned IP address to client\n");
+    case ARDUINO_EVENT_WIFI_AP_STADISCONNECTED:
+        LOG_INFO("Client disconnected\n");
         break;
-    case SYSTEM_EVENT_AP_PROBEREQRECVED:
-        DEBUG_MSG("Received probe request\n");
+    case ARDUINO_EVENT_WIFI_AP_STAIPASSIGNED:
+        LOG_INFO("Assigned IP address to client\n");
         break;
-    case SYSTEM_EVENT_GOT_IP6:
-        DEBUG_MSG("IPv6 is preferred\n");
+    case ARDUINO_EVENT_WIFI_AP_PROBEREQRECVED:
+        LOG_INFO("Received probe request\n");
         break;
-    case SYSTEM_EVENT_ETH_START:
-        DEBUG_MSG("Ethernet started\n");
+    case ARDUINO_EVENT_WIFI_AP_GOT_IP6:
+        LOG_INFO("IPv6 is preferred\n");
         break;
-    case SYSTEM_EVENT_ETH_STOP:
-        DEBUG_MSG("Ethernet stopped\n");
+    case ARDUINO_EVENT_WIFI_FTM_REPORT:
+        LOG_INFO("Fast Transition Management report\n");
         break;
-    case SYSTEM_EVENT_ETH_CONNECTED:
-        DEBUG_MSG("Ethernet connected\n");
+    case ARDUINO_EVENT_ETH_START:
+        LOG_INFO("Ethernet started\n");
         break;
-    case SYSTEM_EVENT_ETH_DISCONNECTED:
-        DEBUG_MSG("Ethernet disconnected\n");
+    case ARDUINO_EVENT_ETH_STOP:
+        LOG_INFO("Ethernet stopped\n");
         break;
-    case SYSTEM_EVENT_ETH_GOT_IP:
-        DEBUG_MSG("Obtained IP address (SYSTEM_EVENT_ETH_GOT_IP)\n");
+    case ARDUINO_EVENT_ETH_CONNECTED:
+        LOG_INFO("Ethernet connected\n");
+        break;
+    case ARDUINO_EVENT_ETH_DISCONNECTED:
+        LOG_INFO("Ethernet disconnected\n");
+        break;
+    case ARDUINO_EVENT_ETH_GOT_IP:
+        LOG_INFO("Obtained IP address (ARDUINO_EVENT_ETH_GOT_IP)\n");
+        break;
+    case ARDUINO_EVENT_ETH_GOT_IP6:
+        LOG_INFO("Obtained IP6 address (ARDUINO_EVENT_ETH_GOT_IP6)\n");
+        break;
+    case ARDUINO_EVENT_SC_SCAN_DONE:
+        LOG_INFO("SmartConfig: Scan done\n");
+        break;
+    case ARDUINO_EVENT_SC_FOUND_CHANNEL:
+        LOG_INFO("SmartConfig: Found channel\n");
+        break;
+    case ARDUINO_EVENT_SC_GOT_SSID_PSWD:
+        LOG_INFO("SmartConfig: Got SSID and password\n");
+        break;
+    case ARDUINO_EVENT_SC_SEND_ACK_DONE:
+        LOG_INFO("SmartConfig: Send ACK done\n");
+        break;
+    case ARDUINO_EVENT_PROV_INIT:
+        LOG_INFO("Provisioning: Init\n");
+        break;
+    case ARDUINO_EVENT_PROV_DEINIT:
+        LOG_INFO("Provisioning: Stopped\n");
+        break;
+    case ARDUINO_EVENT_PROV_START:
+        LOG_INFO("Provisioning: Started\n");
+        break;
+    case ARDUINO_EVENT_PROV_END:
+        LOG_INFO("Provisioning: End\n");
+        break;
+    case ARDUINO_EVENT_PROV_CRED_RECV:
+        LOG_INFO("Provisioning: Credentials received\n");
+        break;
+    case ARDUINO_EVENT_PROV_CRED_FAIL:
+        LOG_INFO("Provisioning: Credentials failed\n");
+        break;
+    case ARDUINO_EVENT_PROV_CRED_SUCCESS:
+        LOG_INFO("Provisioning: Credentials success\n");
         break;
     default:
         break;
