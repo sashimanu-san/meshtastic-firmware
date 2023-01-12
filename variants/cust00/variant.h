@@ -6,14 +6,12 @@
 //#define GPS_RX_PIN 36
 //#define GPS_TX_PIN 33
 
-#ifndef USE_JTAG  // gpio15 is TDO for JTAG, so no I2C on this board while doing jtag
-#define I2C_SDA 4 // I2C pins for this board
-#define I2C_SCL 15
-#endif
+#define I2C_SDA 5 // I2C pins for this board
+#define I2C_SCL 4
 
 //#define RESET_OLED 16 // If defined, this pin will be used to reset the display controller
 
-#define VEXT_ENABLE 21 // active low, powers the oled display and the lora antenna boost
+//#define VEXT_ENABLE 21 // active low, powers the oled display and the lora antenna boost
 #define LED_PIN 25     // If defined we will blink this LED
 #define BUTTON_PIN 0   // If defined, this will be used for user button presses
 
@@ -23,8 +21,8 @@
 #define LORA_RESET 17
 #endif
 
-#define LORA_DIO1 27 // Not really used
-#define LORA_DIO2 14 // Not really used
+#define LORA_DIO1 RADIOLIB_NC  // Not used
+#define LORA_DIO2 RADIOLIB_NC  // Not used
 
 #define RF95_SCK  18
 #define RF95_MISO 19
