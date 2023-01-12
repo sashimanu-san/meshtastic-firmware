@@ -386,6 +386,15 @@ static void drawTextMessageFrame(OLEDDisplay *display, OLEDDisplayUiState *state
     }
     display->setColor(WHITE);
     snprintf(tempBuf, sizeof(tempBuf), "%s", mp.decoded.payload.bytes);
+    
+    //string lengths are approximate
+    if(strlen(tempBuf) < 20) { 
+        display->setFont(FONT_LARGE);
+    }
+    else if (strlen(tempBuf) < 40) {
+        display->setFont(FONT_MEDIUM);
+    }
+
     display->drawStringMaxWidth(0 + x, 0 + y + FONT_HEIGHT_SMALL, x + display->getWidth(), tempBuf);
 }
 
