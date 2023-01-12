@@ -55,6 +55,9 @@ class Router : protected concurrency::OSThread
      */
     MeshPacket *allocForSending();
 
+    /** Return Underlying interface's TX queue status */
+    QueueStatus getQueueStatus();
+
     /**
      * @return our local nodenum */
     NodeNum getNodeNum();
@@ -90,7 +93,7 @@ class Router : protected concurrency::OSThread
      * Called immedately on receiption, before any further processing.
      * @return true to abandon the packet
      */
-    virtual bool shouldFilterReceived(MeshPacket *p) { return false; }
+    virtual bool shouldFilterReceived(const MeshPacket *p) { return false; }
 
     /**
      * Every (non duplicate) packet this node receives will be passed through this method.  This allows subclasses to

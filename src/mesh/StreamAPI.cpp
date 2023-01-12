@@ -6,7 +6,7 @@
 #define START2 0xc3
 #define HEADER_LEN 4
 
-int32_t StreamAPI::runOnce()
+int32_t StreamAPI::runOncePart()
 {
     auto result = readStream();
     writeStream();
@@ -95,7 +95,7 @@ void StreamAPI::writeStream()
 void StreamAPI::emitTxBuffer(size_t len)
 {
     if (len != 0) {
-        // DEBUG_MSG("emit tx %d\n", len);
+        // LOG_DEBUG("emit tx %d\n", len);
         txBuf[0] = START1;
         txBuf[1] = START2;
         txBuf[2] = (len >> 8) & 0xff;
@@ -114,8 +114,8 @@ void StreamAPI::emitRebooted()
     fromRadioScratch.which_payload_variant = FromRadio_rebooted_tag;
     fromRadioScratch.rebooted = true;
 
-    // DEBUG_MSG("Emitting reboot packet for serial shell\n");
-    emitTxBuffer(pb_encode_to_bytes(txBuf + HEADER_LEN, FromRadio_size, FromRadio_fields, &fromRadioScratch));
+    // LOG_DEBUG("Emitting reboot packet for serial shell\n");
+    emitTxBuffer(pb_encode_to_bytes(txBuf + HEADER_LEN, FromRadio_size, &FromRadio_msg, &fromRadioScratch));
 }
 
 /// Hookable to find out when connection changes

@@ -32,16 +32,16 @@ static bool isPowered()
 
 static void sdsEnter()
 {
-    DEBUG_MSG("Enter state: SDS\n");
+    LOG_INFO("Enter state: SDS\n");
     // FIXME - make sure GPS and LORA radio are off first - because we want close to zero current draw
-    doDeepSleep(config.power.sds_secs * 1000);
+    doDeepSleep(getConfiguredOrDefaultMs(config.power.sds_secs));
 }
 
 extern Power *power;
 
 static void shutdownEnter()
 {
-    DEBUG_MSG("Enter state: SHUTDOWN\n");
+    LOG_INFO("Enter state: SHUTDOWN\n");
     power->shutdown();
 }
 
@@ -51,16 +51,16 @@ static uint32_t secsSlept;
 
 static void lsEnter()
 {
-    DEBUG_MSG("lsEnter begin, ls_secs=%u\n", config.power.ls_secs);
+    LOG_INFO("lsEnter begin, ls_secs=%u\n", config.power.ls_secs);
     screen->setOn(false);
     secsSlept = 0; // How long have we been sleeping this time
 
-    // DEBUG_MSG("lsEnter end\n");
+    // LOG_INFO("lsEnter end\n");
 }
 
 static void lsIdle()
 {
-    // DEBUG_MSG("lsIdle begin ls_secs=%u\n", getPref_ls_secs());
+    // LOG_INFO("lsIdle begin ls_secs=%u\n", getPref_ls_secs());
 
 #ifdef ARCH_ESP32
 
@@ -82,7 +82,7 @@ static void lsIdle()
                 wakeCause2 = doLightSleep(1); // leave led on for 1ms
 
                 secsSlept += sleepTime;
-                // DEBUG_MSG("sleeping, flash led!\n");
+                // LOG_INFO("sleeping, flash led!\n");
                 break;
 
             case ESP_SLEEP_WAKEUP_UART:
@@ -93,7 +93,7 @@ static void lsIdle()
             default:
                 // We woke for some other reason (button press, device interrupt)
                 // uint64_t status = esp_sleep_get_ext1_wakeup_status();
-                DEBUG_MSG("wakeCause2 %d\n", wakeCause2);
+                LOG_INFO("wakeCause2 %d\n", wakeCause2);
 
 #ifdef BUTTON_PIN
                 bool pressed = !digitalRead(BUTTON_PIN);
@@ -117,7 +117,7 @@ static void lsIdle()
     } else {
         // Time to stop sleeping!
         setLed(false);
-        DEBUG_MSG("reached ls_secs, servicing loop()\n");
+        LOG_INFO("Reached ls_secs, servicing loop()\n");
         powerFSM.trigger(EVENT_WAKE_TIMER);
     }
 #endif
@@ -125,7 +125,7 @@ static void lsIdle()
 
 static void lsExit()
 {
-    DEBUG_MSG("Exit state: LS\n");
+    LOG_INFO("Exit state: LS\n");
     // setGPSPower(true); // restore GPS power
     if (gps)
         gps->forceWake(true);
@@ -133,7 +133,7 @@ static void lsExit()
 
 static void nbEnter()
 {
-    DEBUG_MSG("Enter state: NB\n");
+    LOG_INFO("Enter state: NB\n");
     screen->setOn(false);
     setBluetoothEnable(false);
 
@@ -148,7 +148,7 @@ static void darkEnter()
 
 static void serialEnter()
 {
-    DEBUG_MSG("Enter state: SERIAL\n");
+    LOG_INFO("Enter state: SERIAL\n");
     setBluetoothEnable(false);
     screen->setOn(true);
     screen->print("Serial connected\n");
@@ -161,10 +161,10 @@ static void serialExit()
 
 static void powerEnter()
 {
-    DEBUG_MSG("Enter state: POWER\n");
+    LOG_INFO("Enter state: POWER\n");
     if (!isPowered()) {
         // If we got here, we are in the wrong state - we should be in powered, let that state ahndle things
-        DEBUG_MSG("Loss of power in Powered\n");
+        LOG_INFO("Loss of power in Powered\n");
         powerFSM.trigger(EVENT_POWER_DISCONNECTED);
     } else {
         screen->setOn(true);
@@ -177,7 +177,7 @@ static void powerIdle()
 {
     if (!isPowered()) {
         // If we got here, we are in the wrong state
-        DEBUG_MSG("Loss of power in Powered\n");
+        LOG_INFO("Loss of power in Powered\n");
         powerFSM.trigger(EVENT_POWER_DISCONNECTED);
     }
 }
@@ -191,7 +191,7 @@ static void powerExit()
 
 static void onEnter()
 {
-    DEBUG_MSG("Enter state: ON\n");
+    LOG_INFO("Enter state: ON\n");
     screen->setOn(true);
     setBluetoothEnable(true);
 
@@ -221,7 +221,7 @@ static void screenPress()
 
 static void bootEnter()
 {
-    DEBUG_MSG("Enter state: BOOT\n");
+    LOG_INFO("Enter state: BOOT\n");
 }
 
 State stateSHUTDOWN(shutdownEnter, NULL, NULL, "SHUTDOWN");
@@ -240,7 +240,7 @@ void PowerFSM_setup()
     bool isRouter = (config.device.role == Config_DeviceConfig_Role_ROUTER ? 1 : 0);
     bool hasPower = isPowered();
 
-    DEBUG_MSG("PowerFSM init, USB power=%d\n", hasPower ? 1 : 0);
+    LOG_INFO("PowerFSM init, USB power=%d\n", hasPower ? 1 : 0);
     powerFSM.add_timed_transition(&stateBOOT, hasPower ? &statePOWER : &stateON, 3 * 1000, NULL, "boot timeout");
 
     // wake timer expired or a packet arrived
@@ -324,31 +324,22 @@ void PowerFSM_setup()
 
     powerFSM.add_transition(&stateDARK, &stateDARK, EVENT_CONTACT_FROM_PHONE, NULL, "Contact from phone");
 
-    // each time we get a new update packet make sure we are staying in the ON state so the screen stays awake (also we don't
-    // shutdown bluetooth if is_router)
-    powerFSM.add_transition(&stateDARK, &stateON, EVENT_FIRMWARE_UPDATE, NULL, "Got firmware update");
-    powerFSM.add_transition(&stateON, &stateON, EVENT_FIRMWARE_UPDATE, NULL, "Got firmware update");
-
     powerFSM.add_timed_transition(&stateON, &stateDARK, getConfiguredOrDefaultMs(config.display.screen_on_secs, default_screen_on_secs), NULL, "Screen-on timeout");
 
-    // On most boards we use light-sleep to be our main state, but on NRF52 we just stay in DARK
-    State *lowPowerState = &stateLS;
-
 #ifdef ARCH_ESP32
+    State *lowPowerState = &stateLS;
     // We never enter light-sleep or NB states on NRF52 (because the CPU uses so little power normally)
 
     // See: https://github.com/meshtastic/firmware/issues/1071
     if (isRouter || config.power.is_power_saving) {
         powerFSM.add_timed_transition(&stateNB, &stateLS, getConfiguredOrDefaultMs(config.power.min_wake_secs, default_min_wake_secs), NULL, "Min wake timeout");
         powerFSM.add_timed_transition(&stateDARK, &stateLS, getConfiguredOrDefaultMs(config.power.wait_bluetooth_secs, default_wait_bluetooth_secs), NULL, "Bluetooth timeout");
-    } 
-
-#elif defined (ARCH_NRF52)
-    lowPowerState = &stateDARK;
-#endif
+    }
 
     if (config.power.sds_secs != UINT32_MAX)
-        powerFSM.add_timed_transition(lowPowerState, &stateSDS, config.power.sds_secs * 1000, NULL, "mesh timeout");
+        powerFSM.add_timed_transition(lowPowerState, &stateSDS, getConfiguredOrDefaultMs(config.power.sds_secs), NULL, "mesh timeout");
+#endif
+
 
     powerFSM.run_machine(); // run one interation of the state machine, so we run our on enter tasks for the initial DARK state
 }

@@ -29,7 +29,9 @@ Observable<void *> preflightSleep;
 
 /// Called to tell observers we are now entering sleep and you should prepare.  Must return 0
 /// notifySleep will be called for light or deep sleep, notifyDeepSleep is only called for deep sleep
+/// notifyGPSSleep will be called when config.position.gps_enabled is set to 0 or from buttonthread when GPS_POWER_TOGGLE is enabled.
 Observable<void *> notifySleep, notifyDeepSleep;
+Observable<void *> notifyGPSSleep;
 
 // deep sleep support
 RTC_DATA_ATTR int bootCount = 0;
@@ -58,7 +60,7 @@ void setCPUFast(bool on)
          *     all WiFi use cases.
          * (Added: Dec 23, 2021 by Jm Casler)
          */
-        DEBUG_MSG("Setting CPU to 240mhz because WiFi is in use.\n");
+        LOG_DEBUG("Setting CPU to 240mhz because WiFi is in use.\n");
         setCpuFrequencyMhz(240);
         return;
     }
@@ -88,7 +90,7 @@ void setLed(bool ledOn)
 
 void setGPSPower(bool on)
 {
-    DEBUG_MSG("Setting GPS power=%d\n", on);
+    LOG_INFO("Setting GPS power=%d\n", on);
 
 #ifdef HAS_PMU
     if (pmu_found && PMU){
@@ -134,7 +136,7 @@ void initDeepSleep()
     if (wakeCause == ESP_SLEEP_WAKEUP_TIMER)
         reason = "timeout";
 
-    DEBUG_MSG("booted, wake cause %d (boot count %d), reset_reason=%s\n", wakeCause, bootCount, reason);
+    LOG_INFO("Booted, wake cause %d (boot count %d), reset_reason=%s\n", wakeCause, bootCount, reason);
 #endif
 }
 
@@ -161,15 +163,45 @@ static void waitEnterSleep()
     }
 
     // Code that still needs to be moved into notifyObservers
-    Serial.flush();            // send all our characters before we stop cpu clock
+    console->flush();            // send all our characters before we stop cpu clock
     setBluetoothEnable(false); // has to be off before calling light sleep
 
     notifySleep.notifyObservers(NULL);
 }
 
+void doGPSpowersave(bool on)
+{
+    #ifdef HAS_PMU
+    if (on)
+    {
+        LOG_INFO("Turning GPS back on\n");
+        gps->forceWake(1);
+        setGPSPower(1);
+    }
+    else
+    {
+        LOG_INFO("Turning off GPS chip\n");
+        notifyGPSSleep.notifyObservers(NULL);
+        setGPSPower(0);
+    }
+    #endif
+    #ifdef PIN_GPS_WAKE
+    if (on)
+    {
+        LOG_INFO("Waking GPS");
+        gps->forceWake(1);
+    }
+    else
+    {
+        LOG_INFO("GPS entering sleep");
+        notifyGPSSleep.notifyObservers(NULL);
+    }
+    #endif
+}
+
 void doDeepSleep(uint64_t msecToWake)
 {
-    DEBUG_MSG("Entering deep sleep for %lu seconds\n", msecToWake / 1000);
+    LOG_INFO("Entering deep sleep for %lu seconds\n", msecToWake / 1000);
 
     // not using wifi yet, but once we are this is needed to shutoff the radio hw
     // esp_wifi_stop();
@@ -226,7 +258,7 @@ void doDeepSleep(uint64_t msecToWake)
  */
 esp_sleep_wakeup_cause_t doLightSleep(uint64_t sleepMsec) // FIXME, use a more reasonable default
 {
-    // DEBUG_MSG("Enter light sleep\n");
+    // LOG_DEBUG("Enter light sleep\n");
 
     waitEnterSleep();
 
@@ -237,7 +269,7 @@ esp_sleep_wakeup_cause_t doLightSleep(uint64_t sleepMsec) // FIXME, use a more r
     // We want RTC peripherals to stay on
     esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON);
 
-#ifdef BUTTON_NEED_PULLUP
+#if defined(BUTTON_PIN) && defined(BUTTON_NEED_PULLUP)
     gpio_pullup_en((gpio_num_t)BUTTON_PIN);
 #endif
 
@@ -278,7 +310,7 @@ esp_sleep_wakeup_cause_t doLightSleep(uint64_t sleepMsec) // FIXME, use a more r
     esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
 #ifdef BUTTON_PIN
     if (cause == ESP_SLEEP_WAKEUP_GPIO)
-        DEBUG_MSG("Exit light sleep gpio: btn=%d\n", !digitalRead(BUTTON_PIN));
+        LOG_INFO("Exit light sleep gpio: btn=%d\n", !digitalRead(BUTTON_PIN));
 #endif
 
     return cause;
@@ -300,12 +332,14 @@ void enableModemSleep()
 
 #if CONFIG_IDF_TARGET_ESP32S3
     esp32_config.max_freq_mhz = CONFIG_ESP32S3_DEFAULT_CPU_FREQ_MHZ;
+#elif CONFIG_IDF_TARGET_ESP32S2
+    esp32_config.max_freq_mhz = CONFIG_ESP32S2_DEFAULT_CPU_FREQ_MHZ;
 #else
     esp32_config.max_freq_mhz = CONFIG_ESP32_DEFAULT_CPU_FREQ_MHZ;
 #endif
     esp32_config.min_freq_mhz = 20; // 10Mhz is minimum recommended
     esp32_config.light_sleep_enable = false;
     int rv = esp_pm_configure(&esp32_config);
-    DEBUG_MSG("Sleep request result %x\n", rv);
+    LOG_DEBUG("Sleep request result %x\n", rv);
 }
 #endif

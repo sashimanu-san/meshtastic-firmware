@@ -23,7 +23,7 @@ bool NodeInfoModule::handleReceivedProtobuf(const MeshPacket &mp, User *pptr)
             screen->print(lcd.c_str());
     }
 
-    // DEBUG_MSG("did handleReceived\n");
+    // LOG_DEBUG("did handleReceived\n");
     return false; // Let others look at this message also if they want
 }
 
@@ -46,12 +46,12 @@ MeshPacket *NodeInfoModule::allocReply()
 {
     User &u = owner;
 
-    DEBUG_MSG("sending owner %s/%s/%s\n", u.id, u.long_name, u.short_name);
+    LOG_INFO("sending owner %s/%s/%s\n", u.id, u.long_name, u.short_name);
     return allocDataProtobuf(u);
 }
 
 NodeInfoModule::NodeInfoModule()
-    : ProtobufModule("nodeinfo", PortNum_NODEINFO_APP, User_fields), concurrency::OSThread("NodeInfoModule")
+    : ProtobufModule("nodeinfo", PortNum_NODEINFO_APP, &User_msg), concurrency::OSThread("NodeInfoModule")
 {
     isPromiscuous = true; // We always want to update our nodedb, even if we are sniffing on others
     setIntervalFromNow(30 * 1000); // Send our initial owner announcement 30 seconds after we start (to give network time to setup)
@@ -65,8 +65,10 @@ int32_t NodeInfoModule::runOnce()
     bool requestReplies = currentGeneration != radioGeneration;
     currentGeneration = radioGeneration;
 
-    DEBUG_MSG("Sending our nodeinfo to mesh (wantReplies=%d)\n", requestReplies);
-    sendOurNodeInfo(NODENUM_BROADCAST, requestReplies); // Send our info (don't request replies)
+    if (airTime->isTxAllowedAirUtil()) {
+        LOG_INFO("Sending our nodeinfo to mesh (wantReplies=%d)\n", requestReplies);
+        sendOurNodeInfo(NODENUM_BROADCAST, requestReplies); // Send our info (don't request replies)
+    }
 
     return default_broadcast_interval_secs * 1000;
 }

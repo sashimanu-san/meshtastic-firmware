@@ -4,6 +4,7 @@
 #include "configuration.h"
 #include <Arduino.h>
 #include <functional>
+#include "MeshRadio.h"
 
 /*
   TX_LOG      - Time on air this device has transmitted
@@ -29,6 +30,7 @@
 #define PERIODS_TO_LOG 8
 #define MINUTES_IN_HOUR 60
 #define SECONDS_IN_MINUTE 60
+#define MS_IN_MINUTE (SECONDS_IN_MINUTE * 1000)
 #define MS_IN_HOUR (MINUTES_IN_HOUR * SECONDS_IN_MINUTE * 1000)
 
 
@@ -57,12 +59,18 @@ class AirTime : private concurrency::OSThread
     uint32_t getSecondsPerPeriod();
     uint32_t getSecondsSinceBoot();
     uint32_t *airtimeReport(reportTypes reportType);
+    uint8_t getSilentMinutes(float txPercent, float dutyCycle);
+    bool isTxAllowedChannelUtil(bool polite=false);
+    bool isTxAllowedAirUtil();
 
   private:
     bool firstTime = true;
     uint8_t lastUtilPeriod = 0;
     uint8_t lastUtilPeriodTX = 0;
     uint32_t secSinceBoot = 0;
+    uint8_t max_channel_util_percent = 40;
+    uint8_t polite_channel_util_percent = 25;
+    uint8_t polite_duty_cycle_percent = 50;  // half of Duty Cycle allowance is ok for metadata
 
     struct airtimeStruct {
         uint32_t periodTX[PERIODS_TO_LOG];     // AirTime transmitted

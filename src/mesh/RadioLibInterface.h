@@ -1,10 +1,9 @@
 #pragma once
 
-#include "../concurrency/OSThread.h"
+#include "concurrency/NotifiedWorkerThread.h"
 #include "RadioInterface.h"
 #include "MeshPacketQueue.h"
 
-#define RADIOLIB_EXCLUDE_HTTP
 #include <RadioLib.h>
 
 // ESP32 has special rules about ISR code
@@ -153,6 +152,8 @@ class RadioLibInterface : public RadioInterface, protected concurrency::Notified
      *  This method is virtual so subclasses can hook as needed, subclasses should not call directly
      */
     virtual void startSend(MeshPacket *txp);
+
+    QueueStatus getQueueStatus();
 
   protected:
 

@@ -2,9 +2,8 @@
 
 #include "RadioInterface.h"
 #include "MeshPacketQueue.h"
-#include "wifi/WiFiServerAPI.h"
+#include "api/WiFiServerAPI.h"
 
-#define RADIOLIB_EXCLUDE_HTTP
 #include <RadioLib.h>
 
 class SimRadio : public RadioInterface
@@ -45,6 +44,9 @@ class SimRadio : public RadioInterface
      * External functions can call this method to wake the device from sleep.
      */
     virtual void startReceive(MeshPacket *p);
+
+    QueueStatus getQueueStatus() override;
+
 
   protected: 
     /// are _trying_ to receive a packet currently (note - we might just be waiting for one)
