@@ -21,10 +21,11 @@
 #ifndef USE_JTAG
 #define LORA_RESET 14
 #endif
-#define LORA_DIO1 35 // Not really used
+#define LORA_DIO1 35 // https://www.thethingsnetwork.org/forum/t/big-esp32-sx127x-topic-part-3/18436
 #define LORA_DIO2 34 // Not really used
 
 // ratio of voltage divider = 3.20 (R12=100k, R10=220k)
 #define ADC_MULTIPLIER 3.2
 #define BATTERY_PIN 13 // A battery voltage measurement pin, voltage divider connected here to measure battery voltage
-
+#define ADC_CHANNEL ADC2_GPIO13_CHANNEL
+#define BAT_MEASURE_ADC_UNIT 2

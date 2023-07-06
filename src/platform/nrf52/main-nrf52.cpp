@@ -1,16 +1,15 @@
 #include "configuration.h"
+#include <Adafruit_nRFCrypto.h>
 #include <SPI.h>
 #include <Wire.h>
 #include <assert.h>
 #include <ble_gap.h>
 #include <memory.h>
 #include <stdio.h>
-#include <Adafruit_nRFCrypto.h>
 // #include <Adafruit_USBD_Device.h>
 #include "NodeDB.h"
-
-#include "NRF52Bluetooth.h"
 #include "error.h"
+#include "main.h"
 
 #ifdef BQ25703A_ADDR
 #include "BQ25713.h"
@@ -22,7 +21,8 @@ static inline void debugger_break(void)
                    "mov pc, lr\n\t");
 }
 
-bool loopCanSleep() {
+bool loopCanSleep()
+{
     // turn off sleep only while connected via USB
     // return true;
     return !Serial; // the bool operator on the nrf52 serial class returns true if connected to a PC currently
@@ -62,8 +62,6 @@ static void initBrownout()
     // We don't bother with setting up brownout if soft device is disabled - because during production we always use softdevice
 }
 
-NRF52Bluetooth *nrf52Bluetooth;
-
 static bool bleOn = false;
 static const bool useSoftDevice = true; // Set to false for easier debugging
 
@@ -77,7 +75,7 @@ void setBluetoothEnable(bool on)
                 else {
                     nrf52Bluetooth = new NRF52Bluetooth();
                     nrf52Bluetooth->setup();
-                    
+
                     // We delay brownout init until after BLE because BLE starts soft device
                     initBrownout();
                 }
@@ -108,7 +106,7 @@ void checkSDEvents()
         while (NRF_SUCCESS == sd_evt_get(&evt)) {
             switch (evt) {
             case NRF_EVT_POWER_FAILURE_WARNING:
-                RECORD_CRITICALERROR(CriticalErrorCode_BROWNOUT);
+                RECORD_CRITICALERROR(meshtastic_CriticalErrorCode_BROWNOUT);
                 break;
 
             default:
@@ -118,7 +116,7 @@ void checkSDEvents()
         }
     } else {
         if (NRF_POWER->EVENTS_POFWARN)
-            RECORD_CRITICALERROR(CriticalErrorCode_BROWNOUT);
+            RECORD_CRITICALERROR(meshtastic_CriticalErrorCode_BROWNOUT);
     }
 }
 
@@ -148,7 +146,7 @@ void nrf52Setup()
     // Init random seed
     union seedParts {
         uint32_t seed32;
-        uint8_t  seed8[4];
+        uint8_t seed8[4];
     } seed;
     nRFCrypto.begin();
     nRFCrypto.Random.generate(seed.seed8, sizeof(seed.seed8));
@@ -157,7 +155,7 @@ void nrf52Setup()
     nRFCrypto.end();
 }
 
-void cpuDeepSleep(uint64_t msecToWake)
+void cpuDeepSleep(uint32_t msecToWake)
 {
     // FIXME, configure RTC or button press to wake us
     // FIXME, power down SPI, I2C, RAMs
@@ -172,8 +170,15 @@ void cpuDeepSleep(uint64_t msecToWake)
     Serial1.end();
 #endif
     setBluetoothEnable(false);
+
 #ifdef RAK4630
+#ifdef PIN_3V3_EN
     digitalWrite(PIN_3V3_EN, LOW);
+#endif
+#ifndef USE_EINK
+    // RAK-12039 set pin for Air quality sensor
+    digitalWrite(AQ_SET_PIN, LOW);
+#endif
 #endif
     // FIXME, use system off mode with ram retention for key state?
     // FIXME, use non-init RAM per
@@ -192,7 +197,8 @@ void cpuDeepSleep(uint64_t msecToWake)
     }
 }
 
-void clearBonds() {
+void clearBonds()
+{
     if (!nrf52Bluetooth) {
         nrf52Bluetooth = new NRF52Bluetooth();
         nrf52Bluetooth->setup();

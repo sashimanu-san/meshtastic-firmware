@@ -10,19 +10,18 @@
 #include "mesh/http/WiFiAPClient.h"
 
 #include "sleep.h"
+#include "soc/rtc.h"
 #include "target_specific.h"
 #include "utils.h"
 #include <Preferences.h>
 #include <driver/rtc_io.h>
 #include <nvs.h>
 #include <nvs_flash.h>
-#include "soc/rtc.h"
 
 #if !defined(CONFIG_IDF_TARGET_ESP32S2)
-NimbleBluetooth *nimbleBluetooth;
 
-void setBluetoothEnable(bool on) {
-
+void setBluetoothEnable(bool on)
+{
     if (!isWifiAvailable() && config.bluetooth.enabled == true) {
         if (!nimbleBluetooth) {
             nimbleBluetooth = new NimbleBluetooth();
@@ -35,8 +34,8 @@ void setBluetoothEnable(bool on) {
     }
 }
 #else
-void setBluetoothEnable(bool on) { }
-void updateBatteryLevel(uint8_t level) { }
+void setBluetoothEnable(bool on) {}
+void updateBatteryLevel(uint8_t level) {}
 #endif
 
 void getMacAddr(uint8_t *dmac)
@@ -76,17 +75,16 @@ void enableSlowCLK()
     CALIBRATE_ONE(RTC_CAL_RTC_MUX);
     CALIBRATE_ONE(RTC_CAL_32K_XTAL);
     if (rtc_clk_slow_freq_get() != RTC_SLOW_FREQ_32K_XTAL) {
-        LOG_WARN("Failed to switch 32K XTAL RTC source to 32.768Khz !!! \n"); return;
+        LOG_WARN("Failed to switch 32K XTAL RTC source to 32.768Khz !!! \n");
+        return;
     }
 }
 #endif
-
 
 void esp32Setup()
 {
     uint32_t seed = esp_random();
     LOG_DEBUG("Setting random seed %u\n", seed);
-    randomSeed(seed); // ESP docs say this is fairly random
 
     LOG_DEBUG("Total heap: %d\n", ESP.getHeapSize());
     LOG_DEBUG("Free heap: %d\n", ESP.getFreeHeap());
@@ -96,8 +94,8 @@ void esp32Setup()
     nvs_stats_t nvs_stats;
     auto res = nvs_get_stats(NULL, &nvs_stats);
     assert(res == ESP_OK);
-    LOG_DEBUG("NVS: UsedEntries %d, FreeEntries %d, AllEntries %d, NameSpaces %d\n", nvs_stats.used_entries, nvs_stats.free_entries,
-              nvs_stats.total_entries, nvs_stats.namespace_count);
+    LOG_DEBUG("NVS: UsedEntries %d, FreeEntries %d, AllEntries %d, NameSpaces %d\n", nvs_stats.used_entries,
+              nvs_stats.free_entries, nvs_stats.total_entries, nvs_stats.namespace_count);
 
     LOG_DEBUG("Setup Preferences in Flash Storage\n");
 
@@ -110,10 +108,10 @@ void esp32Setup()
     preferences.putUInt("rebootCounter", rebootCounter);
     preferences.end();
     LOG_DEBUG("Number of Device Reboots: %d\n", rebootCounter);
-    String BLEOTA=BleOta::getOtaAppVersion();
+    String BLEOTA = BleOta::getOtaAppVersion();
     if (BLEOTA.isEmpty()) {
         LOG_DEBUG("No OTA firmware available\n");
-    }else{
+    } else {
         LOG_DEBUG("OTA firmware version %s\n", BLEOTA.c_str());
     }
 
@@ -155,7 +153,6 @@ uint32_t axpDebugRead()
 Periodic axpDebugOutput(axpDebugRead);
 #endif
 
-
 /// loop code specific to ESP32 targets
 void esp32Loop()
 {
@@ -165,7 +162,7 @@ void esp32Loop()
     // radio.radioIf.canSleep();
 }
 
-void cpuDeepSleep(uint64_t msecToWake)
+void cpuDeepSleep(uint32_t msecToWake)
 {
     /*
     Some ESP32 IOs have internal pullups or pulldowns, which are enabled by default.
@@ -180,6 +177,7 @@ void cpuDeepSleep(uint64_t msecToWake)
 
     Note: we don't isolate pins that are used for the LORA, LED, i2c, spi or the wake button
     */
+#if SOC_RTCIO_HOLD_SUPPORTED
     static const uint8_t rtcGpios[] = {/* 0, */ 2,
     /* 4, */
 #ifndef USE_JTAG
@@ -193,6 +191,7 @@ void cpuDeepSleep(uint64_t msecToWake)
 
     for (int i = 0; i < sizeof(rtcGpios); i++)
         rtc_gpio_isolate((gpio_num_t)rtcGpios[i]);
+#endif
 
     // FIXME, disable internal rtc pullups/pulldowns on the non isolated pins. for inputs that we aren't using
     // to detect wake and in normal operation the external part drives them hard.
@@ -202,7 +201,9 @@ void cpuDeepSleep(uint64_t msecToWake)
 
 #ifdef BUTTON_PIN
     // Only GPIOs which are have RTC functionality can be used in this bit map: 0,2,4,12-15,25-27,32-39.
-    uint64_t gpioMask = (1ULL << BUTTON_PIN);
+#if SOC_RTCIO_HOLD_SUPPORTED
+    uint64_t gpioMask = (1ULL << config.device.button_gpio ? config.device.button_gpio : BUTTON_PIN);
+#endif
 
 #ifdef BUTTON_NEED_PULLUP
     gpio_pullup_en((gpio_num_t)BUTTON_PIN);
@@ -212,7 +213,9 @@ void cpuDeepSleep(uint64_t msecToWake)
     // FIXME change polarity in hw so we can wake on ANY_HIGH instead - that would allow us to use all three buttons (instead of
     // just the first) gpio_pullup_en((gpio_num_t)BUTTON_PIN);
 
+#if SOC_PM_SUPPORT_EXT_WAKEUP
     esp_sleep_enable_ext1_wakeup(gpioMask, ESP_EXT1_WAKEUP_ALL_LOW);
+#endif
 #endif
 
     esp_sleep_enable_timer_wakeup(msecToWake * 1000ULL); // call expects usecs

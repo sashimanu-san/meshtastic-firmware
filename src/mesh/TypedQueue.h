@@ -19,10 +19,7 @@ template <class T> class TypedQueue
     concurrency::OSThread *reader = NULL;
 
   public:
-    explicit TypedQueue(int maxElements) : h(xQueueCreate(maxElements, sizeof(T)))
-    {
-        assert(h);
-    }
+    explicit TypedQueue(int maxElements) : h(xQueueCreate(maxElements, sizeof(T))) { assert(h); }
 
     ~TypedQueue() { vQueueDelete(h); }
 
@@ -77,7 +74,7 @@ template <class T> class TypedQueue
     concurrency::OSThread *reader = NULL;
 
   public:
-    TypedQueue(int maxElements) {}
+    explicit TypedQueue(int maxElements) {}
 
     int numFree() { return 1; } // Always claim 1 free, because we can grow to any size
 

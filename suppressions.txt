@@ -36,6 +36,7 @@ cstyleCast
 // ignore stuff that is not ours
 *:.pio/*
 *:*/libdeps/*
+*:*/generated/*
 noExplicitConstructor:*/mqtt/*
 postfixOperator:*/mqtt/*
 
@@ -43,3 +44,6 @@ postfixOperator:*/mqtt/*
 missingOverride
 virtualCallInConstructor
 
+passedByValue:*/RedirectablePrint.h
+
+internalAstError:*/CrossPlatformCryptoEngine.cpp

@@ -4,6 +4,7 @@
 #define GPS_TX_PIN 13 // per @eugene
 
 #define BATTERY_PIN 35 // A battery voltage measurement pin, voltage divider connected here to measure battery voltage
+#define ADC_CHANNEL ADC1_GPIO35_CHANNEL
 
 #define I2C_SDA 21 // I2C pins for this board
 #define I2C_SCL 22
@@ -18,5 +19,5 @@
 #define USE_RF95
 #define LORA_DIO0 26 // a No connect on the SX1262 module
 #define LORA_RESET 14
-#define LORA_DIO1 35 // Not really used
-#define LORA_DIO2 34 // Not really used
+#define LORA_DIO1 33 // Prob. must be manually wired: https://www.thethingsnetwork.org/forum/t/big-esp32-sx127x-topic-part-3/18436
+#define LORA_DIO2 32 // Not really used

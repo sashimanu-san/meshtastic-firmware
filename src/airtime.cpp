@@ -6,20 +6,22 @@ AirTime *airTime = NULL;
 
 // Don't read out of this directly. Use the helper functions.
 
+uint32_t air_period_tx[PERIODS_TO_LOG];
+uint32_t air_period_rx[PERIODS_TO_LOG];
+
 void AirTime::logAirtime(reportTypes reportType, uint32_t airtime_ms)
 {
 
     if (reportType == TX_LOG) {
         LOG_DEBUG("AirTime - Packet transmitted : %ums\n", airtime_ms);
         this->airtimes.periodTX[0] = this->airtimes.periodTX[0] + airtime_ms;
-        myNodeInfo.air_period_tx[0] = myNodeInfo.air_period_tx[0] + airtime_ms;
+        air_period_tx[0] = air_period_tx[0] + airtime_ms;
 
         this->utilizationTX[this->getPeriodUtilHour()] = this->utilizationTX[this->getPeriodUtilHour()] + airtime_ms;
-
     } else if (reportType == RX_LOG) {
         LOG_DEBUG("AirTime - Packet received : %ums\n", airtime_ms);
         this->airtimes.periodRX[0] = this->airtimes.periodRX[0] + airtime_ms;
-        myNodeInfo.air_period_rx[0] = myNodeInfo.air_period_rx[0] + airtime_ms;
+        air_period_rx[0] = air_period_rx[0] + airtime_ms;
     } else if (reportType == RX_ALL_LOG) {
         LOG_DEBUG("AirTime - Packet received (noise?) : %ums\n", airtime_ms);
         this->airtimes.periodRX_ALL[0] = this->airtimes.periodRX_ALL[0] + airtime_ms;
@@ -34,11 +36,13 @@ uint8_t AirTime::currentPeriodIndex()
     return ((getSecondsSinceBoot() / SECONDS_PER_PERIOD) % PERIODS_TO_LOG);
 }
 
-uint8_t AirTime::getPeriodUtilMinute() {
+uint8_t AirTime::getPeriodUtilMinute()
+{
     return (getSecondsSinceBoot() / 10) % CHANNEL_UTILIZATION_PERIODS;
 }
 
-uint8_t AirTime::getPeriodUtilHour() {
+uint8_t AirTime::getPeriodUtilHour()
+{
     return (getSecondsSinceBoot() / 60) % MINUTES_IN_HOUR;
 }
 
@@ -53,16 +57,16 @@ void AirTime::airtimeRotatePeriod()
             this->airtimes.periodRX[i + 1] = this->airtimes.periodRX[i];
             this->airtimes.periodRX_ALL[i + 1] = this->airtimes.periodRX_ALL[i];
 
-            myNodeInfo.air_period_tx[i + 1] = this->airtimes.periodTX[i];
-            myNodeInfo.air_period_rx[i + 1] = this->airtimes.periodRX[i];
+            air_period_tx[i + 1] = this->airtimes.periodTX[i];
+            air_period_rx[i + 1] = this->airtimes.periodRX[i];
         }
 
         this->airtimes.periodTX[0] = 0;
         this->airtimes.periodRX[0] = 0;
         this->airtimes.periodRX_ALL[0] = 0;
 
-        myNodeInfo.air_period_tx[0] = 0;
-        myNodeInfo.air_period_rx[0] = 0;
+        air_period_tx[0] = 0;
+        air_period_rx[0] = 0;
 
         this->airtimes.lastPeriodIndex = this->currentPeriodIndex();
     }
@@ -119,23 +123,23 @@ float AirTime::utilizationTXPercent()
 
 bool AirTime::isTxAllowedChannelUtil(bool polite)
 {
-    uint8_t percentage = (polite ? polite_channel_util_percent : max_channel_util_percent); 
+    uint8_t percentage = (polite ? polite_channel_util_percent : max_channel_util_percent);
     if (channelUtilizationPercent() < percentage) {
-        return true; 
+        return true;
     } else {
         LOG_WARN("Channel utilization is >%d percent. Skipping this opportunity to send.\n", percentage);
         return false;
     }
 }
 
-
-bool AirTime::isTxAllowedAirUtil() 
+bool AirTime::isTxAllowedAirUtil()
 {
     if (!config.lora.override_duty_cycle && myRegion->dutyCycle < 100) {
         if (utilizationTXPercent() < myRegion->dutyCycle * polite_duty_cycle_percent / 100) {
-            return true; 
+            return true;
         } else {
-            LOG_WARN("Tx air utilization is >%d percent. Skipping this opportunity to send.\n", myRegion->dutyCycle * polite_duty_cycle_percent / 100);
+            LOG_WARN("Tx air utilization is >%f percent. Skipping this opportunity to send.\n",
+                     myRegion->dutyCycle * polite_duty_cycle_percent / 100);
             return false;
         }
     }
@@ -143,21 +147,19 @@ bool AirTime::isTxAllowedAirUtil()
 }
 
 // Get the amount of minutes we have to be silent before we can send again
-uint8_t AirTime::getSilentMinutes(float txPercent, float dutyCycle) 
-{  
-  float newTxPercent = txPercent;
-  for (int8_t i = MINUTES_IN_HOUR-1; i >= 0; --i) {
-      newTxPercent -= ((float)this->utilizationTX[i] / (MS_IN_MINUTE * MINUTES_IN_HOUR / 100));
-      if (newTxPercent < dutyCycle) 
-          return MINUTES_IN_HOUR-1-i;
-  }
+uint8_t AirTime::getSilentMinutes(float txPercent, float dutyCycle)
+{
+    float newTxPercent = txPercent;
+    for (int8_t i = MINUTES_IN_HOUR - 1; i >= 0; --i) {
+        newTxPercent -= ((float)this->utilizationTX[i] / (MS_IN_MINUTE * MINUTES_IN_HOUR / 100));
+        if (newTxPercent < dutyCycle)
+            return MINUTES_IN_HOUR - 1 - i;
+    }
 
-  return MINUTES_IN_HOUR;
+    return MINUTES_IN_HOUR;
 }
 
-
-AirTime::AirTime() : concurrency::OSThread("AirTime"),airtimes({}) {
-}
+AirTime::AirTime() : concurrency::OSThread("AirTime"), airtimes({}) {}
 
 int32_t AirTime::runOnce()
 {
@@ -179,18 +181,17 @@ int32_t AirTime::runOnce()
         }
 
         // Init airtime windows to all 0
-        for (int i = 0; i < myNodeInfo.air_period_rx_count; i++) {
+        for (int i = 0; i < PERIODS_TO_LOG; i++) {
             this->airtimes.periodTX[i] = 0;
             this->airtimes.periodRX[i] = 0;
             this->airtimes.periodRX_ALL[i] = 0;
 
-            // myNodeInfo.air_period_tx[i] = 0;
-            // myNodeInfo.air_period_rx[i] = 0;
+            // air_period_tx[i] = 0;
+            // air_period_rx[i] = 0;
         }
 
         firstTime = false;
         lastUtilPeriod = utilPeriod;
-
     } else {
         this->airtimeRotatePeriod();
 
@@ -206,21 +207,15 @@ int32_t AirTime::runOnce()
 
             this->utilizationTX[utilPeriodTX] = 0;
         }
-
-        // Update channel_utilization every second.
-        myNodeInfo.channel_utilization = airTime->channelUtilizationPercent();
-
-        // Update channel_utilization every second.
-        myNodeInfo.air_util_tx = airTime->utilizationTXPercent();
     }
-/*
-    LOG_DEBUG("utilPeriodTX %d TX Airtime %3.2f%\n", utilPeriodTX, airTime->utilizationTXPercent());
-    for (uint32_t i = 0; i < MINUTES_IN_HOUR; i++) {
-        LOG_DEBUG(
-            "%d,", this->utilizationTX[i]
-            );
-    }
-    LOG_DEBUG("\n");
-*/
+    /*
+        LOG_DEBUG("utilPeriodTX %d TX Airtime %3.2f%\n", utilPeriodTX, airTime->utilizationTXPercent());
+        for (uint32_t i = 0; i < MINUTES_IN_HOUR; i++) {
+            LOG_DEBUG(
+                "%d,", this->utilizationTX[i]
+                );
+        }
+        LOG_DEBUG("\n");
+    */
     return (1000 * 1);
 }

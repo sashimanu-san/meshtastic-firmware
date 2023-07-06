@@ -1,7 +1,8 @@
 #pragma once
 
 #include "InputBroker.h"
-#include "SinglePortModule.h" // TODO: what header file to include?
+#include "concurrency/OSThread.h"
+#include "mesh/NodeDB.h"
 
 enum RotaryEncoderInterruptBaseStateType { ROTARY_EVENT_OCCURRED, ROTARY_EVENT_CLEARED };
 
@@ -33,8 +34,8 @@ class RotaryEncoderInterruptBase : public Observable<const InputEvent *>, public
   private:
     uint8_t _pinA = 0;
     uint8_t _pinB = 0;
-    char _eventCw = ModuleConfig_CannedMessageConfig_InputEventChar_NONE;
-    char _eventCcw = ModuleConfig_CannedMessageConfig_InputEventChar_NONE;
-    char _eventPressed = ModuleConfig_CannedMessageConfig_InputEventChar_NONE;
+    char _eventCw = meshtastic_ModuleConfig_CannedMessageConfig_InputEventChar_NONE;
+    char _eventCcw = meshtastic_ModuleConfig_CannedMessageConfig_InputEventChar_NONE;
+    char _eventPressed = meshtastic_ModuleConfig_CannedMessageConfig_InputEventChar_NONE;
     const char *_originName;
 };

@@ -1,5 +1,7 @@
-#include "configuration.h"
 #include "CryptoEngine.h"
+#include "configuration.h"
+
+concurrency::Lock *cryptLock;
 
 void CryptoEngine::setKey(const CryptoKey &k)
 {

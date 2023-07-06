@@ -1,8 +1,8 @@
 #pragma once
 
-#include "concurrency/NotifiedWorkerThread.h"
-#include "RadioInterface.h"
 #include "MeshPacketQueue.h"
+#include "RadioInterface.h"
+#include "concurrency/NotifiedWorkerThread.h"
 
 #include <RadioLib.h>
 
@@ -13,36 +13,32 @@
 #define INTERRUPT_ATTR
 #endif
 
+#define RADIOLIB_PIN_TYPE uint32_t
+
 /**
- * A wrapper for the RadioLib Module class, that adds mutex for SPI bus access
+ * We need to override the RadioLib ArduinoHal class to add mutex protection for SPI bus access
  */
-class LockingModule : public Module
+class LockingArduinoHal : public ArduinoHal
 {
   public:
-    /*!
-      \brief Extended SPI-based module constructor.
+    LockingArduinoHal(SPIClass &spi, SPISettings spiSettings) : ArduinoHal(spi, spiSettings){};
 
-      \param cs Arduino pin to be used as chip select.
-
-      \param irq Arduino pin to be used as interrupt/GPIO.
-
-      \param rst Arduino pin to be used as hardware reset for the module.
-
-      \param gpio Arduino pin to be used as additional interrupt/GPIO.
-
-      \param spi SPI interface to be used, can also use software SPI implementations.
-
-      \param spiSettings SPI interface settings.
-    */
-    LockingModule(RADIOLIB_PIN_TYPE cs, RADIOLIB_PIN_TYPE irq, RADIOLIB_PIN_TYPE rst, RADIOLIB_PIN_TYPE gpio, SPIClass &spi,
-                  SPISettings spiSettings)
-        : Module(cs, irq, rst, gpio, spi, spiSettings)
-    {
-    }
-    
-    void SPIbeginTransaction() override;
-    void SPIendTransaction() override;
+    void spiBeginTransaction() override;
+    void spiEndTransaction() override;
 };
+
+#if defined(USE_STM32WLx)
+/**
+ * A wrapper for the RadioLib STM32WLx_Module class, that doesn't connect any pins as they are virtual
+ */
+class STM32WLx_ModuleWrapper : public STM32WLx_Module
+{
+  public:
+    STM32WLx_ModuleWrapper(LockingArduinoHal *hal, RADIOLIB_PIN_TYPE cs, RADIOLIB_PIN_TYPE irq, RADIOLIB_PIN_TYPE rst,
+                           RADIOLIB_PIN_TYPE busy)
+        : STM32WLx_Module(){};
+};
+#endif
 
 class RadioLibInterface : public RadioInterface, protected concurrency::NotifiedWorkerThread
 {
@@ -62,19 +58,22 @@ class RadioLibInterface : public RadioInterface, protected concurrency::Notified
     MeshPacketQueue txQueue = MeshPacketQueue(MAX_TX_QUEUE);
 
   protected:
-
     /**
-     * We use a meshtastic sync word, but hashed with the Channel name.  For releases before 1.2 we used 0x12 (or for very old loads 0x14)
-     * Note: do not use 0x34 - that is reserved for lorawan
-     * 
-     * We now use 0x2b (so that someday we can possibly use NOT 2b - because that would be funny pun).  We will be staying with this code
-     * for a long time.
+     * We use a meshtastic sync word, but hashed with the Channel name.  For releases before 1.2 we used 0x12 (or for very old
+     * loads 0x14) Note: do not use 0x34 - that is reserved for lorawan
+     *
+     * We now use 0x2b (so that someday we can possibly use NOT 2b - because that would be funny pun).  We will be staying with
+     * this code for a long time.
      */
     const uint8_t syncWord = 0x2b;
-    
-    float currentLimit = 100;   // 100mA OCP - Should be acceptable for RFM95/SX127x chipset.  
 
-    LockingModule module; // The HW interface to the radio
+    float currentLimit = 100; // 100mA OCP - Should be acceptable for RFM95/SX127x chipset.
+
+#if !defined(USE_STM32WLx)
+    Module module; // The HW interface to the radio
+#else
+    STM32WLx_ModuleWrapper module;
+#endif
 
     /**
      * provides lowest common denominator RadioLib API
@@ -100,10 +99,10 @@ class RadioLibInterface : public RadioInterface, protected concurrency::Notified
     virtual void enableInterrupt(void (*)()) = 0;
 
   public:
-    RadioLibInterface(RADIOLIB_PIN_TYPE cs, RADIOLIB_PIN_TYPE irq, RADIOLIB_PIN_TYPE rst, RADIOLIB_PIN_TYPE busy, SPIClass &spi,
-                      PhysicalLayer *iface = NULL);
+    RadioLibInterface(LockingArduinoHal *hal, RADIOLIB_PIN_TYPE cs, RADIOLIB_PIN_TYPE irq, RADIOLIB_PIN_TYPE rst,
+                      RADIOLIB_PIN_TYPE busy, PhysicalLayer *iface = NULL);
 
-    virtual ErrorCode send(MeshPacket *p) override;
+    virtual ErrorCode send(meshtastic_MeshPacket *p) override;
 
     /**
      * Return true if we think the board can go to sleep (i.e. our tx queue is empty, we are not sending or receiving)
@@ -131,8 +130,8 @@ class RadioLibInterface : public RadioInterface, protected concurrency::Notified
     virtual bool cancelSending(NodeNum from, PacketId id) override;
 
   private:
-    /** if we have something waiting to send, start a short (random) timer so we can come check for collision before actually doing
-     * the transmit */
+    /** if we have something waiting to send, start a short (random) timer so we can come check for collision before actually
+     * doing the transmit */
     void setTransmitDelay();
 
     /** random timer with certain min. and max. settings */
@@ -151,12 +150,11 @@ class RadioLibInterface : public RadioInterface, protected concurrency::Notified
     /** start an immediate transmit
      *  This method is virtual so subclasses can hook as needed, subclasses should not call directly
      */
-    virtual void startSend(MeshPacket *txp);
+    virtual void startSend(meshtastic_MeshPacket *txp);
 
-    QueueStatus getQueueStatus();
+    meshtastic_QueueStatus getQueueStatus();
 
   protected:
-
     /** Do any hardware setup needed on entry into send configuration for the radio.  Subclasses can customize */
     virtual void configHardwareForSend() {}
 
@@ -175,7 +173,7 @@ class RadioLibInterface : public RadioInterface, protected concurrency::Notified
     /**
      * Add SNR data to received messages
      */
-    virtual void addReceiveMetadata(MeshPacket *mp) = 0;
+    virtual void addReceiveMetadata(meshtastic_MeshPacket *mp) = 0;
 
     virtual void setStandby() = 0;
 };

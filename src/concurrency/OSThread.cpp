@@ -1,5 +1,6 @@
-#include "configuration.h"
 #include "OSThread.h"
+#include "configuration.h"
+#include "memGet.h"
 #include <assert.h>
 
 namespace concurrency
@@ -60,14 +61,17 @@ bool OSThread::shouldRun(unsigned long time)
 {
     bool r = Thread::shouldRun(time);
 
-    if (showRun && r)
+    if (showRun && r) {
         LOG_DEBUG("Thread %s: run\n", ThreadName.c_str());
+    }
 
-    if (showWaiting && enabled && !r)
+    if (showWaiting && enabled && !r) {
         LOG_DEBUG("Thread %s: wait %lu\n", ThreadName.c_str(), interval);
+    }
 
-    if (showDisabled && !enabled)
+    if (showDisabled && !enabled) {
         LOG_DEBUG("Thread %s: disabled\n", ThreadName.c_str());
+    }
 
     return r;
 }
@@ -75,12 +79,12 @@ bool OSThread::shouldRun(unsigned long time)
 void OSThread::run()
 {
 #ifdef DEBUG_HEAP
-    auto heap = ESP.getFreeHeap();
-#endif    
+    auto heap = memGet.getFreeHeap();
+#endif
     currentThread = this;
     auto newDelay = runOnce();
 #ifdef DEBUG_HEAP
-    auto newHeap = ESP.getFreeHeap();
+    auto newHeap = memGet.getFreeHeap();
     if (newHeap < heap)
         LOG_DEBUG("------ Thread %s leaked heap %d -> %d (%d) ------\n", ThreadName.c_str(), heap, newHeap, newHeap - heap);
     if (heap < newHeap)
@@ -95,11 +99,11 @@ void OSThread::run()
     currentThread = NULL;
 }
 
-int32_t OSThread::disable() 
+int32_t OSThread::disable()
 {
     enabled = false;
     setInterval(INT32_MAX);
-    
+
     return INT32_MAX;
 }
 

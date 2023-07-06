@@ -31,7 +31,7 @@ SerialConsole::SerialConsole() : StreamAPI(&Port), RedirectablePrint(&Port), con
                       // setDestination(&noopPrint); for testing, try turning off 'all' debug output and see what leaks
 
     Port.begin(SERIAL_BAUD);
-#if defined(ARCH_NRF52) || defined(CONFIG_IDF_TARGET_ESP32S2) || defined(CONFIG_IDF_TARGET_ESP32S3)
+#if defined(ARCH_NRF52) || defined(CONFIG_IDF_TARGET_ESP32S2) || defined(CONFIG_IDF_TARGET_ESP32S3) || defined(ARCH_RP2040)
     time_t timeout = millis();
     while (!Port) {
         if ((millis() - timeout) < 5000) {
@@ -49,7 +49,8 @@ int32_t SerialConsole::runOnce()
     return runOncePart();
 }
 
-void SerialConsole::flush() {
+void SerialConsole::flush()
+{
     Port.flush();
 }
 
@@ -74,7 +75,7 @@ bool SerialConsole::handleToRadio(const uint8_t *buf, size_t len)
         canWrite = true;
 
         return StreamAPI::handleToRadio(buf, len);
-    }else{
+    } else {
         return false;
     }
 }

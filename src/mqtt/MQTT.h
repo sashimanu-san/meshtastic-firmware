@@ -4,10 +4,13 @@
 
 #include "concurrency/OSThread.h"
 #include "mesh/Channels.h"
-#include "mesh/generated/mqtt.pb.h"
+#include "mesh/generated/meshtastic/mqtt.pb.h"
 #include <PubSubClient.h>
 #if HAS_WIFI
 #include <WiFiClient.h>
+#if !defined(ARCH_PORTDUINO)
+#include <WiFiClientSecure.h>
+#endif
 #endif
 #if HAS_ETHERNET
 #include <EthernetClient.h>
@@ -23,19 +26,23 @@ class MQTT : private concurrency::OSThread
 {
     // supposedly the current version is busted:
     // http://www.iotsharing.com/2017/08/how-to-use-esp32-mqtts-with-mqtts-mosquitto-broker-tls-ssl.html
-    // WiFiClientSecure wifiClient;
 #if HAS_WIFI
     WiFiClient mqttClient;
+#if !defined(ARCH_PORTDUINO)
+    WiFiClientSecure wifiSecureClient;
+#endif
 #endif
 #if HAS_ETHERNET
     EthernetClient mqttClient;
 #endif
+#if !defined(DEBUG_HEAP_MQTT)
     PubSubClient pubSub;
 
-    // instead we supress sleep from our runOnce() callback
-    // CallbackObserver<MQTT, void *> preflightSleepObserver = CallbackObserver<MQTT, void *>(this, &MQTT::preflightSleepCb);
-
   public:
+#else
+  public:
+    PubSubClient pubSub;
+#endif
     MQTT();
 
     /**
@@ -46,22 +53,25 @@ class MQTT : private concurrency::OSThread
      * Note: for messages we are forwarding on the mesh that we can't find the channel for (because we don't have the keys), we
      * can not forward those messages to the cloud - becuase no way to find a global channel ID.
      */
-    void onSend(const MeshPacket &mp, ChannelIndex chIndex);
+    void onSend(const meshtastic_MeshPacket &mp, ChannelIndex chIndex);
 
     /** Attempt to connect to server if necessary
      */
     void reconnect();
 
     bool connected();
-    
+
   protected:
-    PointerQueue<ServiceEnvelope> mqttQueue;
+    PointerQueue<meshtastic_ServiceEnvelope> mqttQueue;
 
     int reconnectCount = 0;
 
     virtual int32_t runOnce() override;
 
   private:
+    std::string statusTopic = "/2/stat/";
+    std::string cryptTopic = "/2/c/";   // msh/2/c/CHANNELID/NODEID
+    std::string jsonTopic = "/2/json/"; // msh/2/json/CHANNELID/NODEID
     /** return true if we have a channel that wants uplink/downlink
      */
     bool wantsLink() const;
@@ -77,10 +87,10 @@ class MQTT : private concurrency::OSThread
     void onPublish(char *topic, byte *payload, unsigned int length);
 
     /// Called when a new publish arrives from the MQTT server
-    std::string downstreamPacketToJson(MeshPacket *mp);
+    std::string downstreamPacketToJson(meshtastic_MeshPacket *mp);
 
     /// Return 0 if sleep is okay, veto sleep if we are connected to pubsub server
-    // int preflightSleepCb(void *unused = NULL) { return pubSub.connected() ? 1 : 0; }    
+    // int preflightSleepCb(void *unused = NULL) { return pubSub.connected() ? 1 : 0; }
 };
 
 void mqttInit();

@@ -24,10 +24,11 @@
 #ifndef USE_JTAG
 #define LORA_RESET 14
 #endif
-#define LORA_DIO1 35 // Not really used
+#define LORA_DIO1 35 // https://www.thethingsnetwork.org/forum/t/big-esp32-sx127x-topic-part-3/18436
 #define LORA_DIO2 34 // Not really used
 
 #define ADC_MULTIPLIER 3.8
 
 #define BATTERY_PIN 37 // A battery voltage measurement pin, voltage divider connected here to measure battery voltage
+#define ADC_CHANNEL ADC1_GPIO37_CHANNEL
 #define EXT_NOTIFY_OUT 13 // Default pin to use for Ext Notify Module.
